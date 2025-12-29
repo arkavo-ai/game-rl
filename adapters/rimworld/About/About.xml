@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ModMetaData>
+  <name>Game-RL: AI Training Interface</name>
+  <author>Arkavo</author>
+  <packageId>arkavo.gamerl.rimworld</packageId>
+  <supportedVersions>
+    <li>1.4</li>
+    <li>1.5</li>
+    <li>1.6</li>
+  </supportedVersions>
+  <modDependencies>
+    <li>
+      <packageId>brrainz.harmony</packageId>
+      <displayName>Harmony</displayName>
+      <steamWorkshopUrl>steam://url/CommunityFilePage/2009463077</steamWorkshopUrl>
+    </li>
+  </modDependencies>
+  <loadAfter>
+    <li>brrainz.harmony</li>
+  </loadAfter>
+  <description>
+Enables AI agents to observe and control RimWorld colonies through the Game-RL protocol.
+
+Features:
+- ColonyManager agent for strategic colony control
+- Work priority management
+- Colonist drafting and movement
+- Resource and threat observations
+- Deterministic seeding for reproducible experiments
+
+For research and training purposes.
+
+https://github.com/arkavo-ai/game-rl
+  </description>
+</ModMetaData>

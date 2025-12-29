@@ -1,0 +1,58 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>RimWorld.GameRL</AssemblyName>
+    <RootNamespace>RimWorld.GameRL</RootNamespace>
+    <OutputPath>../Assemblies/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Platform-specific RimWorld paths -->
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('OSX'))">
+    <RimWorldPath>$(HOME)/Library/Application Support/Steam/steamapps/common/RimWorld</RimWorldPath>
+    <ManagedPath>$(RimWorldPath)/RimWorldMac.app/Contents/Resources/Data/Managed</ManagedPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <RimWorldPath>$(HOME)/.local/share/Steam/steamapps/common/RimWorld</RimWorldPath>
+    <ManagedPath>$(RimWorldPath)/RimWorldLinux_Data/Managed</ManagedPath>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="$([MSBuild]::IsOSPlatform('Windows'))">
+    <RimWorldPath>C:\Program Files (x86)\Steam\steamapps\common\RimWorld</RimWorldPath>
+    <ManagedPath>$(RimWorldPath)\RimWorldWin64_Data\Managed</ManagedPath>
+  </PropertyGroup>
+
+  <!-- Reference base library -->
+  <ItemGroup>
+    <ProjectReference Include="../../../dotnet/GameRL.Harmony/GameRL.Harmony.csproj" />
+  </ItemGroup>
+
+  <!-- RimWorld assemblies (not copied to output) -->
+  <ItemGroup>
+    <Reference Include="Assembly-CSharp">
+      <HintPath>$(ManagedPath)/Assembly-CSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine">
+      <HintPath>$(ManagedPath)/UnityEngine.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="UnityEngine.CoreModule">
+      <HintPath>$(ManagedPath)/UnityEngine.CoreModule.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Harmony for patching -->
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.3">
+      <PrivateAssets>all</PrivateAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="MessagePack" Version="2.5.140" />
+  </ItemGroup>
+</Project>

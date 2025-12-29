@@ -1,0 +1,83 @@
+{
+  "name": "RimWorld",
+  "version": "1.5",
+  "game_rl_version": "1.0.0",
+  "capabilities": {
+    "multi_agent": true,
+    "max_agents": 8,
+    "deterministic": true,
+    "headless": false,
+    "save_replay": true
+  },
+  "agent_types": [
+    "colony_manager",
+    "entity_behavior",
+    "game_master"
+  ],
+  "default_agent_type": "colony_manager",
+  "action_space": {
+    "type": "discrete_parameterized",
+    "actions": [
+      {
+        "name": "set_work_priority",
+        "description": "Set work priority for a colonist",
+        "params": {
+          "colonist_id": {"type": "entity_id"},
+          "work_type": {"type": "string"},
+          "priority": {"type": "int", "min": 0, "max": 4}
+        }
+      },
+      {
+        "name": "draft",
+        "description": "Draft a colonist for direct control",
+        "params": {"colonist_id": {"type": "entity_id"}}
+      },
+      {
+        "name": "undraft",
+        "description": "Release a colonist from draft",
+        "params": {"colonist_id": {"type": "entity_id"}}
+      },
+      {
+        "name": "move",
+        "description": "Move a drafted colonist to a position",
+        "params": {
+          "colonist_id": {"type": "entity_id"},
+          "x": {"type": "int"},
+          "z": {"type": "int"}
+        }
+      },
+      {
+        "name": "wait",
+        "description": "Do nothing this step",
+        "params": {}
+      }
+    ]
+  },
+  "observation_space": {
+    "type": "dict",
+    "spaces": {
+      "tick": {"type": "int"},
+      "colonist_count": {"type": "int", "min": 0, "max": 50},
+      "colonists": {"type": "sequence", "max_length": 50},
+      "resources": {"type": "dict"},
+      "weather": {"type": "string"},
+      "season": {"type": "string"},
+      "hour": {"type": "int", "min": 0, "max": 23},
+      "threats": {"type": "sequence"}
+    }
+  },
+  "reward_components": [
+    {"name": "colonist_death", "range": [-100, 0], "description": "Large penalty for colonist deaths"},
+    {"name": "colonist_alive", "range": [0, 0.5], "description": "Small bonus per living colonist"},
+    {"name": "wealth_delta", "range": [-10, 10], "description": "Change in colony wealth"},
+    {"name": "mood", "range": [-0.05, 0.05], "description": "Average colonist mood"},
+    {"name": "idle_penalty", "range": [-0.5, 0], "description": "Penalty for idle colonists"},
+    {"name": "injury_penalty", "range": [-0.5, 0], "description": "Penalty for injured colonists"},
+    {"name": "hunger_penalty", "range": [-0.5, 0], "description": "Penalty for hungry colonists"}
+  ],
+  "tick_rate": 60,
+  "max_episode_ticks": 900000,
+  "ipc": {
+    "socket_path": "/tmp/gamerl-rimworld.sock"
+  }
+}
