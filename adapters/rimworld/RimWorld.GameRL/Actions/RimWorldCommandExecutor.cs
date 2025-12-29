@@ -3,24 +3,44 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using Verse;
 using Verse.AI;
 using RimWorld;
 using GameRL.Harmony;
+using GameRL.Harmony.RPC;
 using RimWorld.GameRL.Patches;
 using RimWorld.GameRL.Rewards;
 
 namespace RimWorld.GameRL.Actions
 {
     /// <summary>
-    /// Executes commands in RimWorld
+    /// Executes commands in RimWorld using HarmonyRPC
     /// </summary>
     public class RimWorldCommandExecutor : ICommandExecutor
     {
         private readonly Dictionary<string, AgentInfo> _agents = new();
         private readonly SurvivalReward _rewardCalculator = new();
+        private readonly HarmonyRPC _rpc;
         private int _episodeStartTick;
         private const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
+
+        public RimWorldCommandExecutor()
+        {
+            // Initialize HarmonyRPC with RimWorld logging
+            _rpc = new HarmonyRPC(
+                log: msg => Log.Message(msg),
+                logError: msg => Log.Error(msg)
+            );
+
+            // Register type resolvers for automatic ID -> object conversion
+            _rpc.RegisterResolver(new PawnResolver());
+            _rpc.RegisterResolver(new ThingResolver());
+            _rpc.RegisterResolver(new BuildingResolver());
+
+            // Scan for [GameRLAction] methods in this assembly
+            _rpc.RegisterAll(Assembly.GetExecutingAssembly());
+        }
 
         public bool RegisterAgent(string agentId, string agentType, Dictionary<string, object> config)
         {
@@ -51,7 +71,7 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            // Parse the action - it could be a dictionary or parameterized action
+            // Parse the action dictionary
             var actionDict = action as Dictionary<string, object>;
             if (actionDict == null)
             {
@@ -59,124 +79,20 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
+            // Extract action type and parameters
             var actionType = actionDict.TryGetValue("type", out var t) ? t?.ToString() : null;
-            var actionParams = actionDict.TryGetValue("params", out var p) ? p as Dictionary<string, object> : actionDict;
+            var actionParams = actionDict.TryGetValue("params", out var p)
+                ? p as Dictionary<string, object>
+                : actionDict;
 
-            switch (actionType)
+            if (string.IsNullOrEmpty(actionType))
             {
-                case "set_work_priority":
-                    ExecuteSetWorkPriority(actionParams!);
-                    break;
-                case "draft":
-                    ExecuteDraft(actionParams!);
-                    break;
-                case "undraft":
-                    ExecuteUndraft(actionParams!);
-                    break;
-                case "move":
-                    ExecuteMove(actionParams!);
-                    break;
-                case "wait":
-                case null:
-                    // No-op
-                    break;
-                default:
-                    Log.Warning($"[GameRL] Unknown action type: {actionType}");
-                    break;
-            }
-        }
-
-        private void ExecuteSetWorkPriority(Dictionary<string, object> p)
-        {
-            var colonistId = GetString(p, "colonist_id");
-            var workType = GetString(p, "work_type");
-            var priority = GetInt(p, "priority");
-
-            if (colonistId == null || workType == null)
-            {
-                Log.Warning("[GameRL] set_work_priority missing colonist_id or work_type");
+                // No action type = no-op (wait)
                 return;
             }
 
-            var pawn = FindPawn(colonistId);
-            if (pawn == null)
-            {
-                Log.Warning($"[GameRL] Pawn not found: {colonistId}");
-                return;
-            }
-
-            var workDef = DefDatabase<WorkTypeDef>.GetNamed(workType, errorOnFail: false);
-            if (workDef == null)
-            {
-                Log.Warning($"[GameRL] Work type not found: {workType}");
-                return;
-            }
-
-            pawn.workSettings?.SetPriority(workDef, priority);
-        }
-
-        private void ExecuteDraft(Dictionary<string, object> p)
-        {
-            var colonistId = GetString(p, "colonist_id");
-            if (colonistId == null) return;
-
-            var pawn = FindPawn(colonistId);
-            if (pawn?.drafter != null)
-            {
-                pawn.drafter.Drafted = true;
-            }
-        }
-
-        private void ExecuteUndraft(Dictionary<string, object> p)
-        {
-            var colonistId = GetString(p, "colonist_id");
-            if (colonistId == null) return;
-
-            var pawn = FindPawn(colonistId);
-            if (pawn?.drafter != null)
-            {
-                pawn.drafter.Drafted = false;
-            }
-        }
-
-        private void ExecuteMove(Dictionary<string, object> p)
-        {
-            var colonistId = GetString(p, "colonist_id");
-            var x = GetInt(p, "x");
-            var z = GetInt(p, "z");
-
-            if (colonistId == null) return;
-
-            var pawn = FindPawn(colonistId);
-            if (pawn == null || !pawn.Drafted) return;
-
-            var target = new IntVec3(x, 0, z);
-            var job = JobMaker.MakeJob(JobDefOf.Goto, target);
-            pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
-        }
-
-        private Pawn? FindPawn(string pawnId)
-        {
-            return Find.CurrentMap?.mapPawns.FreeColonists
-                .FirstOrDefault(p => p.ThingID == pawnId);
-        }
-
-        private static string? GetString(Dictionary<string, object> dict, string key)
-        {
-            return dict.TryGetValue(key, out var val) ? val?.ToString() : null;
-        }
-
-        private static int GetInt(Dictionary<string, object> dict, string key)
-        {
-            if (!dict.TryGetValue(key, out var val)) return 0;
-            return val switch
-            {
-                int i => i,
-                long l => (int)l,
-                double d => (int)d,
-                string s => int.TryParse(s, out var i) ? i : 0,
-                _ => 0
-            };
+            // Dispatch via HarmonyRPC - automatic method resolution and parameter binding
+            _rpc.Dispatch(actionType!, actionParams);
         }
 
         public void Reset(ulong? seed, string? scenario)
