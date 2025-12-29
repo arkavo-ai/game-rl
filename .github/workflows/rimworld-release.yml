@@ -1,0 +1,40 @@
+name: RimWorld Mod Release
+
+on:
+  push:
+    tags:
+      - 'rimworld-v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore and Build
+        run: |
+          dotnet restore dotnet/GameRL.Harmony.sln
+          dotnet restore adapters/rimworld/RimWorld.GameRL/RimWorld.GameRL.csproj
+          dotnet build dotnet/GameRL.Harmony.sln -c Release
+          dotnet build adapters/rimworld/RimWorld.GameRL/RimWorld.GameRL.csproj -c Release
+
+      - name: Create mod package
+        run: |
+          mkdir -p release/GameRL
+          cp -r adapters/rimworld/About release/GameRL/
+          cp -r adapters/rimworld/Assemblies release/GameRL/
+          cp adapters/rimworld/manifest.json release/GameRL/
+          cd release && zip -r GameRL-RimWorld-${{ github.ref_name }}.zip GameRL
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/GameRL-RimWorld-${{ github.ref_name }}.zip
+          draft: true
+          generate_release_notes: true

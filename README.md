@@ -45,6 +45,104 @@ cargo run --bin harmony-server -- --game rimworld
 python agent/examples/train_rimworld.py
 ```
 
+## Claude Code Setup
+
+Connect Game-RL to [Claude Code](https://claude.ai/code) for AI-powered game control.
+
+### 1. Build the Server
+
+```bash
+cd game-rl
+cargo build --release --bin harmony-server
+```
+
+### 2. Launch RimWorld First
+
+Start RimWorld with the GameRL mod enabled. The mod creates the Unix socket that the MCP server connects to.
+
+Check that the socket exists:
+
+```bash
+ls -la /tmp/gamerl-rimworld.sock
+```
+
+### 3. Configure Claude Code
+
+Add the MCP server using **absolute paths**:
+
+```bash
+claude mcp add --transport stdio game-rl -- "$(pwd)/target/release/harmony-server" /tmp/gamerl-rimworld.sock
+```
+
+> **Note**: The health check (`claude mcp list`) will show "Failed to connect" until RimWorld is running. This is expected — the MCP server connects to RimWorld, not the other way around.
+
+### 4. Use Claude Code
+
+With RimWorld running:
+
+```bash
+claude
+```
+
+Then interact naturally:
+
+> "Register as a colony manager in RimWorld and check the colonist status."
+
+> "Set mining priority to 1 for the colonist with the lowest mood."
+
+## Arkavo Edge Setup
+
+Connect Game-RL to [Arkavo Edge](https://arkavo.com) for production multi-agent orchestration.
+
+### 1. Build the Server
+
+```bash
+cd game-rl
+cargo build --release --bin harmony-server
+```
+
+### 2. Configure Arkavo Edge
+
+Add the Game-RL MCP server to your Arkavo Edge configuration:
+
+```yaml
+# ~/.arkavo/config.yaml
+mcp_servers:
+  game-rl:
+    command: /path/to/game-rl/target/release/harmony-server
+    args:
+      - /tmp/gamerl-rimworld.sock
+    capabilities:
+      - sim_step
+      - reset
+      - register_agent
+      - get_state_hash
+```
+
+### 3. Launch RimWorld
+
+Start RimWorld with the GameRL mod enabled. The mod creates a Unix socket at `/tmp/gamerl-rimworld.sock`.
+
+### 4. Connect via Arkavo Edge
+
+```bash
+# Start the edge agent
+arkavo-edge connect --mcp game-rl
+
+# Or use the Arkavo CLI
+arkavo agent register --type colony_manager --game rimworld
+arkavo agent step --action '{"type": "SetWorkPriority", "colonist": "pawn_1", "work": "mining", "priority": 1}'
+```
+
+### Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `sim_step` | Execute actions and advance simulation |
+| `reset` | Start a new episode with deterministic seeding |
+| `register_agent` | Register as an agent in the game |
+| `get_state_hash` | Verify game state for reproducibility |
+
 ## Architecture
 
 ```

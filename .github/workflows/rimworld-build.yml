@@ -1,0 +1,46 @@
+name: RimWorld Mod Build
+
+on:
+  push:
+    branches: [main, rimworld-integration]
+    paths:
+      - 'dotnet/**'
+      - 'adapters/rimworld/**'
+      - '.github/workflows/rimworld-build.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'dotnet/**'
+      - 'adapters/rimworld/**'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: |
+          dotnet restore dotnet/GameRL.Harmony.sln
+          dotnet restore adapters/rimworld/RimWorld.GameRL/RimWorld.GameRL.csproj
+
+      - name: Build GameRL.Harmony
+        run: dotnet build dotnet/GameRL.Harmony.sln --no-restore -c Release
+
+      - name: Build RimWorld adapter
+        run: dotnet build adapters/rimworld/RimWorld.GameRL/RimWorld.GameRL.csproj --no-restore -c Release
+
+      - name: Upload mod artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameRL-RimWorld-Mod
+          path: |
+            adapters/rimworld/About/
+            adapters/rimworld/Assemblies/
+            adapters/rimworld/manifest.json

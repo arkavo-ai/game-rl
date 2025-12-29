@@ -1,6 +1,7 @@
 //! Wire protocol for Rust <-> C# communication
 //!
-//! Messages are serialized using MessagePack for efficiency.
+//! Messages are serialized as JSON with internally-tagged enums.
+//! Format: {"type": "message_type", ...fields}
 
 use game_rl_core::{Action, AgentConfig, AgentId, AgentType, GameEvent, Observation};
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,9 @@ pub enum GameMessage {
         state_hash: Option<String>,
     },
 
+    /// State hash response
+    StateHash { hash: String },
+
     /// Error response
     Error { code: i32, message: String },
 
@@ -92,14 +96,14 @@ pub struct GameCapabilities {
     pub headless: bool,
 }
 
-/// Serialize a message to MessagePack bytes
-pub fn serialize(msg: &GameMessage) -> Result<Vec<u8>, rmp_serde::encode::Error> {
-    rmp_serde::to_vec(msg)
+/// Serialize a message to JSON bytes
+pub fn serialize(msg: &GameMessage) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(msg)
 }
 
-/// Deserialize a message from MessagePack bytes
-pub fn deserialize(bytes: &[u8]) -> Result<GameMessage, rmp_serde::decode::Error> {
-    rmp_serde::from_slice(bytes)
+/// Deserialize a message from JSON bytes
+pub fn deserialize(bytes: &[u8]) -> Result<GameMessage, serde_json::Error> {
+    serde_json::from_slice(bytes)
 }
 
 #[cfg(test)]
@@ -124,6 +128,24 @@ mod tests {
 
         match decoded {
             GameMessage::Ready { name, .. } => assert_eq!(name, "TestGame"),
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_get_state_hash_format() {
+        let msg = GameMessage::GetStateHash;
+        let bytes = serialize(&msg).unwrap();
+        let json = String::from_utf8_lossy(&bytes);
+
+        // Should be JSON with type field
+        println!("GetStateHash json: {}", json);
+        assert!(json.contains("\"type\":\"get_state_hash\""), "Should contain type field");
+
+        // Verify it can roundtrip
+        let decoded: GameMessage = deserialize(&bytes).unwrap();
+        match decoded {
+            GameMessage::GetStateHash => {},
             _ => panic!("Wrong message type"),
         }
     }

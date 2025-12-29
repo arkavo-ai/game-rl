@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <AssemblyName>RimWorld.GameRL</AssemblyName>
+    <RootNamespace>RimWorld.GameRL</RootNamespace>
+    <OutputPath>../Assemblies/</OutputPath>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Reference base library -->
+  <ItemGroup>
+    <ProjectReference Include="../../../dotnet/GameRL.Harmony/GameRL.Harmony.csproj" />
+  </ItemGroup>
+
+  <!-- RimWorld reference assemblies (portable, from NuGet) -->
+  <ItemGroup>
+    <PackageReference Include="Krafs.Rimworld.Ref" Version="1.6.4633" />
+  </ItemGroup>
+
+  <!-- Harmony for patching -->
+  <ItemGroup>
+    <PackageReference Include="Lib.Harmony" Version="2.3.3">
+      <PrivateAssets>all</PrivateAssets>
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="MessagePack" Version="2.5.140" />
+  </ItemGroup>
+</Project>

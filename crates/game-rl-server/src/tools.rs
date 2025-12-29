@@ -254,7 +254,7 @@ async fn handle_reset<E: GameEnvironment>(
 async fn handle_state_hash<E: GameEnvironment>(
     environment: &Arc<RwLock<E>>,
 ) -> Result<serde_json::Value> {
-    let env = environment.read().await;
+    let mut env = environment.write().await;
     let hash = env.state_hash().await?;
 
     Ok(serde_json::json!({ "hash": hash }))
