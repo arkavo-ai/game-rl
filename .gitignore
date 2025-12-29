@@ -23,3 +23,4 @@ target
 # .NET build artifacts
 **/bin/
 **/obj/
+adapters/*/Assemblies/*.dll
