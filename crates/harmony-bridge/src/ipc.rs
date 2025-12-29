@@ -144,6 +144,10 @@ impl HarmonyBridge {
     async fn send_internal(&self, msg: &GameMessage) -> Result<()> {
         let data = serialize(msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
+        // Diagnostic logging
+        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
+        info!("[Rust→C#] len={} json={}", data.len(), json_preview);
+
         let mut guard = self.stream.lock().await;
         let stream = guard
             .as_mut()
@@ -160,6 +164,11 @@ impl HarmonyBridge {
             .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
 
         let data = stream.read_message().await?;
+
+        // Diagnostic logging
+        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
+        info!("[C#→Rust] len={} json={}", data.len(), json_preview);
+
         deserialize(&data).map_err(|e| GameRLError::SerializationError(e.to_string()))
     }
 

@@ -326,14 +326,14 @@ where
         .and_then(|v| serde_json::from_value(v.clone()).map_err(|e| de::Error::custom(e.to_string())))
 }
 
-/// Serialize a message to MessagePack bytes
-pub fn serialize(msg: &GameMessage) -> Result<Vec<u8>, rmp_serde::encode::Error> {
-    rmp_serde::to_vec(msg)
+/// Serialize a message to JSON bytes
+pub fn serialize(msg: &GameMessage) -> Result<Vec<u8>, serde_json::Error> {
+    serde_json::to_vec(msg)
 }
 
-/// Deserialize a message from MessagePack bytes
-pub fn deserialize(bytes: &[u8]) -> Result<GameMessage, rmp_serde::decode::Error> {
-    rmp_serde::from_slice(bytes)
+/// Deserialize a message from JSON bytes
+pub fn deserialize(bytes: &[u8]) -> Result<GameMessage, serde_json::Error> {
+    serde_json::from_slice(bytes)
 }
 
 #[cfg(test)]

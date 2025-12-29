@@ -81,7 +81,7 @@ namespace GameRL.Harmony.RPC
             try
             {
                 var methods = assembly.GetTypes()
-                    .Where(t => t.IsClass && !t.IsAbstract)
+                    .Where(t => t.IsClass)  // Include static classes (which are abstract+sealed)
                     .SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.Static))
                     .Where(m => m.GetCustomAttribute<GameRLActionAttribute>() != null);
 

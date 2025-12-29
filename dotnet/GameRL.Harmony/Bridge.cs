@@ -1,14 +1,17 @@
 // IPC Bridge for communication with Rust harmony-server
 // Acts as a SERVER - listens for connection from Rust side
+// Protocol: length-prefixed JSON over Unix socket
 
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 using GameRL.Harmony.Protocol;
-using MessagePack;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace GameRL.Harmony
 {
@@ -198,23 +201,21 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
-        /// Deserialize incoming message based on "type" field
-        /// Uses SimpleMsgPackReader to avoid MessagePack initialization issues in Unity/Mono
+        /// Deserialize incoming JSON message based on "type" field
         /// </summary>
         private GameMessage? DeserializeMessage(byte[] data)
         {
             try
             {
-                var reader = new SimpleMsgPackReader(data);
-                var raw = reader.ReadValue() as Dictionary<string, object?>;
+                var json = Encoding.UTF8.GetString(data);
 
-                if (raw == null)
-                {
-                    LogError("Failed to parse message as map");
-                    return null;
-                }
+                // Diagnostic logging
+                var preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
+                Log($"[C#←Rust] len={data.Length} json={preview}");
 
-                var type = SimpleMsgPackReader.GetString(raw, "type");
+                var obj = JObject.Parse(json);
+                var type = obj["type"]?.ToString();
+
                 if (string.IsNullOrEmpty(type))
                 {
                     LogError("Message missing 'type' field");
@@ -223,10 +224,10 @@ namespace GameRL.Harmony
 
                 return type switch
                 {
-                    "register_agent" => ParseRegisterAgent(raw),
-                    "deregister_agent" => ParseDeregisterAgent(raw),
-                    "execute_action" => ParseExecuteAction(raw),
-                    "reset" => ParseReset(raw),
+                    "register_agent" => ParseRegisterAgent(obj),
+                    "deregister_agent" => ParseDeregisterAgent(obj),
+                    "execute_action" => ParseExecuteAction(obj),
+                    "reset" => ParseReset(obj),
                     "get_state_hash" => new GetStateHashMessage(),
                     "shutdown" => new ShutdownMessage(),
                     _ => null
@@ -239,51 +240,59 @@ namespace GameRL.Harmony
             }
         }
 
-        private RegisterAgentMessage ParseRegisterAgent(Dictionary<string, object?> raw)
+        private RegisterAgentMessage ParseRegisterAgent(JObject obj)
         {
             var msg = new RegisterAgentMessage
             {
-                AgentId = SimpleMsgPackReader.GetString(raw, "agent_id"),
-                AgentType = SimpleMsgPackReader.GetString(raw, "agent_type")
+                AgentId = obj["agent_id"]?.ToString() ?? "",
+                AgentType = obj["agent_type"]?.ToString() ?? ""
             };
 
-            var configRaw = SimpleMsgPackReader.GetMap(raw, "config");
-            if (configRaw != null)
+            var config = obj["config"] as JObject;
+            if (config != null)
             {
                 msg.Config = new AgentConfig
                 {
-                    EntityId = SimpleMsgPackReader.GetNullableString(configRaw, "entity_id"),
-                    ObservationProfile = SimpleMsgPackReader.GetString(configRaw, "observation_profile", "default")
+                    EntityId = config["entity_id"]?.ToString(),
+                    ObservationProfile = config["observation_profile"]?.ToString() ?? "default"
                 };
             }
 
             return msg;
         }
 
-        private DeregisterAgentMessage ParseDeregisterAgent(Dictionary<string, object?> raw)
+        private DeregisterAgentMessage ParseDeregisterAgent(JObject obj)
         {
             return new DeregisterAgentMessage
             {
-                AgentId = SimpleMsgPackReader.GetString(raw, "agent_id")
+                AgentId = obj["agent_id"]?.ToString() ?? ""
             };
         }
 
-        private ExecuteActionMessage ParseExecuteAction(Dictionary<string, object?> raw)
+        private ExecuteActionMessage ParseExecuteAction(JObject obj)
         {
+            // Convert JToken action to Dictionary for HarmonyRPC dispatch
+            object? action = null;
+            var actionToken = obj["action"];
+            if (actionToken != null && actionToken.Type != JTokenType.Null)
+            {
+                action = actionToken.ToObject<Dictionary<string, object>>();
+            }
+
             return new ExecuteActionMessage
             {
-                AgentId = SimpleMsgPackReader.GetString(raw, "agent_id"),
-                Action = raw.TryGetValue("action", out var action) ? action : null,
-                Ticks = SimpleMsgPackReader.GetUInt(raw, "ticks", 1)
+                AgentId = obj["agent_id"]?.ToString() ?? "",
+                Action = action,
+                Ticks = obj["ticks"]?.ToObject<uint>() ?? 1
             };
         }
 
-        private ResetMessage ParseReset(Dictionary<string, object?> raw)
+        private ResetMessage ParseReset(JObject obj)
         {
             return new ResetMessage
             {
-                Seed = SimpleMsgPackReader.GetNullableULong(raw, "seed"),
-                Scenario = SimpleMsgPackReader.GetNullableString(raw, "scenario")
+                Seed = obj["seed"]?.ToObject<ulong?>(),
+                Scenario = obj["scenario"]?.ToString()
             };
         }
 
@@ -429,8 +438,13 @@ namespace GameRL.Harmony
 
             try
             {
-                // Serialize message
-                var data = SerializeMessage(message);
+                // Serialize message to JSON
+                var json = SerializeMessage(message);
+                var data = Encoding.UTF8.GetBytes(json);
+
+                // Diagnostic logging
+                var preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
+                Log($"[C#→Rust] len={data.Length} json={preview}");
 
                 // Length prefix (4 bytes, little-endian to match Rust)
                 var lenBytes = BitConverter.GetBytes(data.Length);
@@ -449,246 +463,67 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
-        /// Serialize message with type field for Rust serde compatibility
-        /// Uses SimpleMsgPackWriter to avoid MessagePack initialization issues in Unity/Mono
+        /// Serialize message to JSON with "type" field for Rust serde compatibility
         /// </summary>
-        private byte[] SerializeMessage(GameMessage message)
+        private string SerializeMessage(GameMessage message)
         {
-            using (var writer = new SimpleMsgPackWriter())
+            var obj = new JObject();
+            obj["type"] = message.Type;
+
+            switch (message)
             {
-                switch (message)
-                {
-                    case ReadyMessage m:
-                        writer.WriteMapHeader(4);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("name");
-                        writer.WriteString(m.Name);
-                        writer.WriteString("version");
-                        writer.WriteString(m.Version);
-                        writer.WriteString("capabilities");
-                        writer.WriteMapHeader(4);
-                        writer.WriteString("multi_agent");
-                        writer.WriteBool(m.Capabilities.MultiAgent);
-                        writer.WriteString("max_agents");
-                        writer.WriteInt(m.Capabilities.MaxAgents);
-                        writer.WriteString("deterministic");
-                        writer.WriteBool(m.Capabilities.Deterministic);
-                        writer.WriteString("headless");
-                        writer.WriteBool(m.Capabilities.Headless);
-                        break;
-
-                    case StepResultMessage m:
-                        // Fields: type, agent_id, observation, reward, reward_components, done, truncated, [state_hash]
-                        var stepFields = m.StateHash != null ? 8 : 7;
-                        writer.WriteMapHeader(stepFields);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("agent_id");
-                        writer.WriteString(m.AgentId);
-                        writer.WriteString("observation");
-                        WriteValue(writer, m.Observation);
-                        writer.WriteString("reward");
-                        writer.WriteDouble(m.Reward);
-                        writer.WriteString("reward_components");
-                        WriteRewardComponents(writer, m.RewardComponents);
-                        writer.WriteString("done");
-                        writer.WriteBool(m.Done);
-                        writer.WriteString("truncated");
-                        writer.WriteBool(m.Truncated);
-                        if (m.StateHash != null)
-                        {
-                            writer.WriteString("state_hash");
-                            writer.WriteString(m.StateHash);
-                        }
-                        break;
-
-                    case ResetCompleteMessage m:
-                        var resetFields = m.StateHash != null ? 3 : 2;
-                        writer.WriteMapHeader(resetFields);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("observation");
-                        WriteValue(writer, m.Observation);
-                        if (m.StateHash != null)
-                        {
-                            writer.WriteString("state_hash");
-                            writer.WriteString(m.StateHash);
-                        }
-                        break;
-
-                    case AgentRegisteredMessage m:
-                        writer.WriteMapHeader(4);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("agent_id");
-                        writer.WriteString(m.AgentId);
-                        writer.WriteString("observation_space");
-                        WriteValue(writer, m.ObservationSpace);
-                        writer.WriteString("action_space");
-                        WriteValue(writer, m.ActionSpace);
-                        break;
-
-                    case StateHashMessage m:
-                        writer.WriteMapHeader(2);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("hash");
-                        writer.WriteString(m.Hash);
-                        break;
-
-                    case ErrorMessage m:
-                        writer.WriteMapHeader(3);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("code");
-                        writer.WriteInt(m.Code);
-                        writer.WriteString("message");
-                        writer.WriteString(m.Message);
-                        break;
-
-                    case StateUpdateMessage m:
-                        writer.WriteMapHeader(4);
-                        writer.WriteString("type");
-                        writer.WriteString(m.Type);
-                        writer.WriteString("tick");
-                        writer.WriteULong(m.Tick);
-                        writer.WriteString("state");
-                        WriteValue(writer, m.State);
-                        writer.WriteString("events");
-                        WriteEvents(writer, m.Events);
-                        break;
-
-                    default:
-                        writer.WriteMapHeader(1);
-                        writer.WriteString("type");
-                        writer.WriteString(message.Type);
-                        break;
-                }
-
-                return writer.ToArray();
-            }
-        }
-
-        private void WriteRewardComponents(SimpleMsgPackWriter writer, Dictionary<string, double> components)
-        {
-            if (components == null)
-            {
-                writer.WriteMapHeader(0);
-                return;
-            }
-            writer.WriteMapHeader(components.Count);
-            foreach (var kvp in components)
-            {
-                writer.WriteString(kvp.Key);
-                writer.WriteDouble(kvp.Value);
-            }
-        }
-
-        private void WriteEvents(SimpleMsgPackWriter writer, List<GameEvent> events)
-        {
-            if (events == null)
-            {
-                writer.WriteArrayHeader(0);
-                return;
-            }
-            writer.WriteArrayHeader(events.Count);
-            foreach (var evt in events)
-            {
-                writer.WriteMapHeader(4);
-                writer.WriteString("type");
-                writer.WriteString(evt.EventType);
-                writer.WriteString("tick");
-                writer.WriteULong(evt.Tick);
-                writer.WriteString("severity");
-                writer.WriteInt(evt.Severity);
-                writer.WriteString("details");
-                WriteValue(writer, evt.Details);
-            }
-        }
-
-        private void WriteValue(SimpleMsgPackWriter writer, object? value)
-        {
-            if (value == null)
-            {
-                writer.WriteNil();
-                return;
-            }
-
-            switch (value)
-            {
-                case string s:
-                    writer.WriteString(s);
-                    break;
-                case bool b:
-                    writer.WriteBool(b);
-                    break;
-                case int i:
-                    writer.WriteInt(i);
-                    break;
-                case long l:
-                    writer.WriteInt((int)l);
-                    break;
-                case float f:
-                    writer.WriteDouble(f);
-                    break;
-                case double d:
-                    writer.WriteDouble(d);
-                    break;
-                case ulong ul:
-                    writer.WriteULong(ul);
-                    break;
-                case Dictionary<string, object> dict:
-                    writer.WriteMapHeader(dict.Count);
-                    foreach (var kvp in dict)
+                case ReadyMessage m:
+                    obj["name"] = m.Name;
+                    obj["version"] = m.Version;
+                    obj["capabilities"] = JObject.FromObject(new
                     {
-                        writer.WriteString(kvp.Key);
-                        WriteValue(writer, kvp.Value);
-                    }
+                        multi_agent = m.Capabilities.MultiAgent,
+                        max_agents = m.Capabilities.MaxAgents,
+                        deterministic = m.Capabilities.Deterministic,
+                        headless = m.Capabilities.Headless
+                    });
                     break;
-                case Dictionary<string, double> ddict:
-                    writer.WriteMapHeader(ddict.Count);
-                    foreach (var kvp in ddict)
-                    {
-                        writer.WriteString(kvp.Key);
-                        writer.WriteDouble(kvp.Value);
-                    }
+
+                case StepResultMessage m:
+                    obj["agent_id"] = m.AgentId;
+                    obj["observation"] = JToken.FromObject(m.Observation ?? new object());
+                    obj["reward"] = m.Reward;
+                    obj["reward_components"] = JToken.FromObject(m.RewardComponents ?? new Dictionary<string, double>());
+                    obj["done"] = m.Done;
+                    obj["truncated"] = m.Truncated;
+                    if (m.StateHash != null)
+                        obj["state_hash"] = m.StateHash;
                     break;
-                case Dictionary<string, int> idict:
-                    writer.WriteMapHeader(idict.Count);
-                    foreach (var kvp in idict)
-                    {
-                        writer.WriteString(kvp.Key);
-                        writer.WriteInt(kvp.Value);
-                    }
+
+                case ResetCompleteMessage m:
+                    obj["observation"] = JToken.FromObject(m.Observation ?? new object());
+                    if (m.StateHash != null)
+                        obj["state_hash"] = m.StateHash;
                     break;
-                case Dictionary<string, string> sdict:
-                    writer.WriteMapHeader(sdict.Count);
-                    foreach (var kvp in sdict)
-                    {
-                        writer.WriteString(kvp.Key);
-                        writer.WriteString(kvp.Value);
-                    }
+
+                case AgentRegisteredMessage m:
+                    obj["agent_id"] = m.AgentId;
+                    obj["observation_space"] = JToken.FromObject(m.ObservationSpace ?? new object());
+                    obj["action_space"] = JToken.FromObject(m.ActionSpace ?? new object());
                     break;
-                case IList<object> list:
-                    writer.WriteArrayHeader(list.Count);
-                    foreach (var item in list)
-                    {
-                        WriteValue(writer, item);
-                    }
+
+                case StateHashMessage m:
+                    obj["hash"] = m.Hash;
                     break;
-                case System.Collections.IList list:
-                    writer.WriteArrayHeader(list.Count);
-                    foreach (var item in list)
-                    {
-                        WriteValue(writer, item);
-                    }
+
+                case ErrorMessage m:
+                    obj["code"] = m.Code;
+                    obj["message"] = m.Message;
                     break;
-                default:
-                    // For unknown types, write as empty map
-                    writer.WriteMapHeader(0);
+
+                case StateUpdateMessage m:
+                    obj["tick"] = m.Tick;
+                    obj["state"] = JToken.FromObject(m.State ?? new object());
+                    obj["events"] = JToken.FromObject(m.Events ?? new List<GameEvent>());
                     break;
             }
+
+            return obj.ToString(Formatting.None);
         }
 
         public void Dispose()
