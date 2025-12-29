@@ -194,10 +194,8 @@ namespace RimWorld.GameRL
 
         private static void HandleGetStateHash(GetStateHashMessage msg)
         {
-            var hash = _stateExtractor?.ComputeStateHash() ?? "unknown";
-            _bridge?.SendStateUpdate(
-                _stateExtractor?.CurrentTick ?? 0,
-                new { state_hash = hash });
+            var hash = _stateExtractor?.ComputeStateHash() ?? "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+            _bridge?.SendStateHash(hash);
         }
 
         private static void HandleShutdown()

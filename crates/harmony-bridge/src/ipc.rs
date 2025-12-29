@@ -9,9 +9,11 @@ use game_rl_core::{
 use game_rl_server::GameEnvironment;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::Mutex;
-use tracing::info;
+use tokio::time::sleep;
+use tracing::{info, warn};
 
 /// Bridge to a .NET game via IPC
 pub struct HarmonyBridge {
@@ -48,6 +50,11 @@ impl HarmonyBridge {
 
     /// Connect to the game process
     pub async fn connect(&mut self) -> Result<()> {
+        self.connect_internal().await
+    }
+
+    /// Internal connect implementation
+    async fn connect_internal(&mut self) -> Result<()> {
         info!("Connecting to game at {}", self.socket_path);
 
         // Platform-specific connection
@@ -71,7 +78,7 @@ impl HarmonyBridge {
         }
 
         // Wait for Ready message
-        let msg = self.recv().await?;
+        let msg = self.recv_internal().await?;
         match msg {
             GameMessage::Ready {
                 name,
@@ -88,9 +95,54 @@ impl HarmonyBridge {
         }
     }
 
-    /// Send a message to the game
-    async fn send(&self, msg: GameMessage) -> Result<()> {
-        let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
+    /// Check if connected
+    async fn is_connected(&self) -> bool {
+        let guard = self.stream.lock().await;
+        guard.is_some()
+    }
+
+    /// Disconnect (clear the stream)
+    async fn disconnect(&self) {
+        let mut guard = self.stream.lock().await;
+        *guard = None;
+    }
+
+    /// Ensure we're connected, attempting reconnection if needed
+    async fn ensure_connected(&mut self) -> Result<()> {
+        if self.is_connected().await {
+            return Ok(());
+        }
+
+        // Try to reconnect with exponential backoff
+        let max_attempts = 5;
+        let mut delay = Duration::from_millis(100);
+
+        for attempt in 1..=max_attempts {
+            warn!("Connection lost, attempting reconnect ({}/{})", attempt, max_attempts);
+
+            match self.connect_internal().await {
+                Ok(()) => {
+                    info!("Reconnected successfully");
+                    return Ok(());
+                }
+                Err(e) => {
+                    if attempt < max_attempts {
+                        warn!("Reconnect failed: {}, retrying in {:?}", e, delay);
+                        sleep(delay).await;
+                        delay = std::cmp::min(delay * 2, Duration::from_secs(5));
+                    } else {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+
+        Err(GameRLError::IpcError("Failed to reconnect after max attempts".into()))
+    }
+
+    /// Send a message to the game (internal, no reconnection)
+    async fn send_internal(&self, msg: &GameMessage) -> Result<()> {
+        let data = serialize(msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
         let mut guard = self.stream.lock().await;
         let stream = guard
@@ -100,8 +152,8 @@ impl HarmonyBridge {
         stream.write_message(&data).await
     }
 
-    /// Receive a message from the game
-    async fn recv(&self) -> Result<GameMessage> {
+    /// Receive a message from the game (internal, no reconnection)
+    async fn recv_internal(&self) -> Result<GameMessage> {
         let mut guard = self.stream.lock().await;
         let stream = guard
             .as_mut()
@@ -111,10 +163,53 @@ impl HarmonyBridge {
         deserialize(&data).map_err(|e| GameRLError::SerializationError(e.to_string()))
     }
 
-    /// Send and wait for response
-    async fn request(&self, msg: GameMessage) -> Result<GameMessage> {
-        self.send(msg).await?;
-        self.recv().await
+    /// Send a message to the game with reconnection support
+    async fn send(&mut self, msg: GameMessage) -> Result<()> {
+        // Try to send, reconnect on failure
+        if let Err(e) = self.send_internal(&msg).await {
+            warn!("Send failed: {}, attempting reconnect", e);
+            self.disconnect().await;
+            self.ensure_connected().await?;
+            self.send_internal(&msg).await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Receive a message from the game with reconnection support
+    /// Used for async notifications (state updates, events) - not yet implemented in protocol
+    #[allow(dead_code)]
+    async fn recv(&mut self) -> Result<GameMessage> {
+        // Try to receive, reconnect on failure
+        match self.recv_internal().await {
+            Ok(msg) => Ok(msg),
+            Err(e) => {
+                warn!("Recv failed: {}, attempting reconnect", e);
+                self.disconnect().await;
+                self.ensure_connected().await?;
+                self.recv_internal().await
+            }
+        }
+    }
+
+    /// Send and wait for response with reconnection support
+    async fn request(&mut self, msg: GameMessage) -> Result<GameMessage> {
+        // Try the full request, reconnect on any failure
+        match self.request_internal(&msg).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                warn!("Request failed: {}, attempting reconnect", e);
+                self.disconnect().await;
+                self.ensure_connected().await?;
+                self.request_internal(&msg).await
+            }
+        }
+    }
+
+    /// Send and wait for response (internal, no reconnection)
+    async fn request_internal(&self, msg: &GameMessage) -> Result<GameMessage> {
+        self.send_internal(msg).await?;
+        self.recv_internal().await
     }
 
     /// Get game manifest from capabilities
@@ -240,10 +335,17 @@ impl GameEnvironment for HarmonyBridge {
         }
     }
 
-    async fn state_hash(&self) -> Result<String> {
-        // Need to use interior mutability for this const method
-        // For now, return placeholder
-        Ok("sha256:0000000000000000000000000000000000000000000000000000000000000000".into())
+    async fn state_hash(&mut self) -> Result<String> {
+        let response = self.request(GameMessage::GetStateHash).await?;
+
+        match response {
+            GameMessage::StateHash { hash } => Ok(hash),
+            GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
+                "Error {}: {}",
+                code, message
+            ))),
+            _ => Err(GameRLError::ProtocolError("Unexpected response".into())),
+        }
     }
 
     async fn configure_streams(

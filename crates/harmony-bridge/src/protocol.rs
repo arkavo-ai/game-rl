@@ -49,6 +49,9 @@ pub enum GameMessage {
         state_hash: Option<String>,
     },
 
+    /// State hash response
+    StateHash { hash: String },
+
     /// Error response
     Error { code: i32, message: String },
 

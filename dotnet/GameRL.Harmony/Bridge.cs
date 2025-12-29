@@ -199,28 +199,36 @@ namespace GameRL.Harmony
 
         /// <summary>
         /// Deserialize incoming message based on "type" field
+        /// Uses SimpleMsgPackReader to avoid MessagePack initialization issues in Unity/Mono
         /// </summary>
         private GameMessage? DeserializeMessage(byte[] data)
         {
             try
             {
-                // First deserialize to get the type field
-                var raw = MessagePackSerializer.Deserialize<Dictionary<string, object>>(data);
-                if (!raw.TryGetValue("type", out var typeObj) || typeObj is not string type)
+                var reader = new SimpleMsgPackReader(data);
+                var raw = reader.ReadValue() as Dictionary<string, object?>;
+
+                if (raw == null)
+                {
+                    LogError("Failed to parse message as map");
+                    return null;
+                }
+
+                var type = SimpleMsgPackReader.GetString(raw, "type");
+                if (string.IsNullOrEmpty(type))
                 {
                     LogError("Message missing 'type' field");
                     return null;
                 }
 
-                // Deserialize to specific type
                 return type switch
                 {
-                    "register_agent" => MessagePackSerializer.Deserialize<RegisterAgentMessage>(data),
-                    "deregister_agent" => MessagePackSerializer.Deserialize<DeregisterAgentMessage>(data),
-                    "execute_action" => MessagePackSerializer.Deserialize<ExecuteActionMessage>(data),
-                    "reset" => MessagePackSerializer.Deserialize<ResetMessage>(data),
-                    "get_state_hash" => MessagePackSerializer.Deserialize<GetStateHashMessage>(data),
-                    "shutdown" => MessagePackSerializer.Deserialize<ShutdownMessage>(data),
+                    "register_agent" => ParseRegisterAgent(raw),
+                    "deregister_agent" => ParseDeregisterAgent(raw),
+                    "execute_action" => ParseExecuteAction(raw),
+                    "reset" => ParseReset(raw),
+                    "get_state_hash" => new GetStateHashMessage(),
+                    "shutdown" => new ShutdownMessage(),
                     _ => null
                 };
             }
@@ -229,6 +237,54 @@ namespace GameRL.Harmony
                 LogError($"Deserialize error: {ex.Message}");
                 return null;
             }
+        }
+
+        private RegisterAgentMessage ParseRegisterAgent(Dictionary<string, object?> raw)
+        {
+            var msg = new RegisterAgentMessage
+            {
+                AgentId = SimpleMsgPackReader.GetString(raw, "agent_id"),
+                AgentType = SimpleMsgPackReader.GetString(raw, "agent_type")
+            };
+
+            var configRaw = SimpleMsgPackReader.GetMap(raw, "config");
+            if (configRaw != null)
+            {
+                msg.Config = new AgentConfig
+                {
+                    EntityId = SimpleMsgPackReader.GetNullableString(configRaw, "entity_id"),
+                    ObservationProfile = SimpleMsgPackReader.GetString(configRaw, "observation_profile", "default")
+                };
+            }
+
+            return msg;
+        }
+
+        private DeregisterAgentMessage ParseDeregisterAgent(Dictionary<string, object?> raw)
+        {
+            return new DeregisterAgentMessage
+            {
+                AgentId = SimpleMsgPackReader.GetString(raw, "agent_id")
+            };
+        }
+
+        private ExecuteActionMessage ParseExecuteAction(Dictionary<string, object?> raw)
+        {
+            return new ExecuteActionMessage
+            {
+                AgentId = SimpleMsgPackReader.GetString(raw, "agent_id"),
+                Action = raw.TryGetValue("action", out var action) ? action : null,
+                Ticks = SimpleMsgPackReader.GetUInt(raw, "ticks", 1)
+            };
+        }
+
+        private ResetMessage ParseReset(Dictionary<string, object?> raw)
+        {
+            return new ResetMessage
+            {
+                Seed = SimpleMsgPackReader.GetNullableULong(raw, "seed"),
+                Scenario = SimpleMsgPackReader.GetNullableString(raw, "scenario")
+            };
         }
 
         /// <summary>
@@ -340,6 +396,17 @@ namespace GameRL.Harmony
             {
                 Code = code,
                 Message = message
+            });
+        }
+
+        /// <summary>
+        /// Send state hash response
+        /// </summary>
+        public void SendStateHash(string hash)
+        {
+            Send(new StateHashMessage
+            {
+                Hash = hash
             });
         }
 
@@ -460,6 +527,14 @@ namespace GameRL.Harmony
                         WriteValue(writer, m.ObservationSpace);
                         writer.WriteString("action_space");
                         WriteValue(writer, m.ActionSpace);
+                        break;
+
+                    case StateHashMessage m:
+                        writer.WriteMapHeader(2);
+                        writer.WriteString("type");
+                        writer.WriteString(m.Type);
+                        writer.WriteString("hash");
+                        writer.WriteString(m.Hash);
                         break;
 
                     case ErrorMessage m:

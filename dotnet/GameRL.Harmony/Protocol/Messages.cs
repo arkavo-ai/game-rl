@@ -146,6 +146,19 @@ namespace GameRL.Harmony.Protocol
     }
 
     /// <summary>
+    /// State hash response
+    /// </summary>
+    [MessagePackObject]
+    public class StateHashMessage : GameMessage
+    {
+        [IgnoreMember]
+        public override string Type => "state_hash";
+
+        [Key("hash")]
+        public string Hash { get; set; } = "";
+    }
+
+    /// <summary>
     /// Error response
     /// </summary>
     [MessagePackObject]

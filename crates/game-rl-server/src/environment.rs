@@ -29,7 +29,7 @@ pub trait GameEnvironment: Send + Sync + 'static {
     async fn reset(&mut self, seed: Option<u64>, scenario: Option<String>) -> Result<Observation>;
 
     /// Get current state hash for determinism verification
-    async fn state_hash(&self) -> Result<String>;
+    async fn state_hash(&mut self) -> Result<String>;
 
     /// Configure vision streams
     async fn configure_streams(
