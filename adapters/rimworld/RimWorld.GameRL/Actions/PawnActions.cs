@@ -1,6 +1,7 @@
 // Pawn actions for RimWorld GameRL - using HarmonyRPC attributes
 
 using System;
+using System.Linq;
 using GameRL.Harmony.RPC;
 using Verse;
 using Verse.AI;
@@ -167,6 +168,94 @@ namespace RimWorld.GameRL.Actions
             {
                 Log.Warning($"[GameRL] haul: Could not create haul job for {thing.ThingID}");
             }
+        }
+
+        /// <summary>
+        /// Move a pawn toward a target entity
+        /// </summary>
+        [GameRLAction("move_to_entity", Description = "Move a pawn toward a target entity")]
+        public static void MoveToEntity(
+            [GameRLParam("colonist_id")] Pawn pawn,
+            [GameRLParam("target_id")] Thing target,
+            int distance = 1)
+        {
+            if (pawn == null || target == null)
+            {
+                Log.Warning("[GameRL] move_to_entity: Pawn or target not found");
+                return;
+            }
+
+            // Find a cell adjacent to the target at the specified distance
+            var targetCell = target.Position;
+            if (distance > 0)
+            {
+                // Find walkable cell near target
+                var cells = GenRadial.RadialCellsAround(target.Position, distance, true)
+                    .Where(c => c.Standable(pawn.Map) && pawn.CanReach(c, PathEndMode.OnCell, Danger.Deadly));
+
+                targetCell = cells.FirstOrDefault();
+                if (targetCell == default)
+                {
+                    Log.Warning($"[GameRL] move_to_entity: No reachable cell near {target.ThingID}");
+                    return;
+                }
+            }
+
+            var job = JobMaker.MakeJob(JobDefOf.Goto, targetCell);
+            pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
+            Log.Message($"[GameRL] move_to_entity: {pawn.LabelShort} moving to {target.LabelShort} at {targetCell}");
+        }
+
+        /// <summary>
+        /// Initiate social interaction with another pawn
+        /// </summary>
+        [GameRLAction("chat", Description = "Initiate social interaction with target pawn")]
+        public static void Chat(
+            [GameRLParam("colonist_id")] Pawn pawn,
+            [GameRLParam("target_id")] Pawn target)
+        {
+            if (pawn == null || target == null)
+            {
+                Log.Warning("[GameRL] chat: Pawn or target not found");
+                return;
+            }
+
+            if (pawn.Downed || target.Downed)
+            {
+                Log.Warning("[GameRL] chat: Cannot chat with downed pawn");
+                return;
+            }
+
+            // Use GotoAndChitchat job to walk to and talk with target
+            var job = JobMaker.MakeJob(JobDefOf.GotoAndBeSociallyActive, target);
+            pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
+            Log.Message($"[GameRL] chat: {pawn.LabelShort} going to chat with {target.LabelShort}");
+        }
+
+        /// <summary>
+        /// Equip a weapon
+        /// </summary>
+        [GameRLAction("equip", Description = "Have a pawn equip a weapon")]
+        public static void Equip(
+            [GameRLParam("colonist_id")] Pawn pawn,
+            [GameRLParam("weapon_id")] Thing weapon)
+        {
+            if (pawn == null || weapon == null)
+            {
+                Log.Warning("[GameRL] equip: Pawn or weapon not found");
+                return;
+            }
+
+            if (!weapon.def.IsWeapon)
+            {
+                Log.Warning($"[GameRL] equip: {weapon.ThingID} is not a weapon");
+                return;
+            }
+
+            // Create job to equip the weapon
+            var job = JobMaker.MakeJob(JobDefOf.Equip, weapon);
+            pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
+            Log.Message($"[GameRL] equip: {pawn.LabelShort} going to equip {weapon.LabelShort}");
         }
     }
 }

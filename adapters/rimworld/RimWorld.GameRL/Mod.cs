@@ -29,6 +29,7 @@ namespace RimWorld.GameRL
         private static string? _currentAgentId;
         private static uint _ticksRemaining;
         private static bool _stepInProgress;
+        private static bool _forcingTicks;
 
         static GameRLMod()
         {
@@ -164,12 +165,43 @@ namespace RimWorld.GameRL
             try
             {
                 _commandExecutor?.ExecuteAction(msg.AgentId, msg.Action!);
+
+                // Force ticks to advance immediately
+                ForceTicks(_ticksRemaining);
             }
             catch (Exception ex)
             {
                 Log.Error($"[GameRL] Action error: {ex}");
                 _stepInProgress = false;
                 _bridge?.SendError(-32001, ex.Message);
+            }
+        }
+
+        private static void ForceTicks(uint count)
+        {
+            if (_forcingTicks) return;  // Prevent recursion
+
+            var tickManager = Find.TickManager;
+            if (tickManager == null)
+            {
+                Log.Warning("[GameRL] No TickManager, cannot force ticks");
+                CompleteStep();
+                return;
+            }
+
+            _forcingTicks = true;
+            try
+            {
+                // Force the game to advance by calling DoSingleTick directly
+                // This will trigger OnTick via the Harmony patch, which decrements _ticksRemaining
+                for (uint i = 0; i < count && _stepInProgress; i++)
+                {
+                    tickManager.DoSingleTick();
+                }
+            }
+            finally
+            {
+                _forcingTicks = false;
             }
         }
 

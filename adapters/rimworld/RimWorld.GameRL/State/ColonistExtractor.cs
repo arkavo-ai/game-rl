@@ -3,6 +3,7 @@
 using System.Collections.Generic;
 using System.Linq;
 using Verse;
+using Verse.AI;
 using RimWorld;
 using MessagePack;
 
@@ -41,6 +42,27 @@ namespace RimWorld.GameRL.State
         [Key("is_drafted")]
         public bool IsDrafted { get; set; }
 
+        [Key("is_downed")]
+        public bool IsDowned { get; set; }
+
+        [Key("is_sleeping")]
+        public bool IsSleeping { get; set; }
+
+        [Key("mental_state")]
+        public string? MentalState { get; set; }
+
+        [Key("can_be_drafted")]
+        public bool CanBeDrafted { get; set; }
+
+        [Key("reachable")]
+        public List<string> Reachable { get; set; } = new();
+
+        [Key("weapon")]
+        public string? Weapon { get; set; }
+
+        [Key("has_ranged_weapon")]
+        public bool HasRangedWeapon { get; set; }
+
         [Key("needs")]
         public Dictionary<string, float> Needs { get; set; } = new();
 
@@ -56,19 +78,19 @@ namespace RimWorld.GameRL.State
     /// </summary>
     public static class ColonistExtractor
     {
-        public static List<ColonistState> Extract(Map? map)
+        public static List<ColonistState> Extract(Map? map, EntityIndex? entities = null)
         {
             if (map == null)
                 return new List<ColonistState>();
 
             return map.mapPawns.FreeColonists
-                .Select(ExtractPawn)
+                .Select(p => ExtractPawn(p, map, entities))
                 .ToList();
         }
 
-        private static ColonistState ExtractPawn(Pawn pawn)
+        private static ColonistState ExtractPawn(Pawn pawn, Map map, EntityIndex? entities)
         {
-            return new ColonistState
+            var state = new ColonistState
             {
                 Id = pawn.ThingID,
                 Name = pawn.Name?.ToStringFull ?? "Unknown",
@@ -79,10 +101,45 @@ namespace RimWorld.GameRL.State
                 Rest = pawn.needs?.rest?.CurLevelPercentage ?? 1f,
                 CurrentJob = pawn.CurJob?.def?.defName,
                 IsDrafted = pawn.Drafted,
+                IsDowned = pawn.Downed,
+                IsSleeping = pawn.CurJob?.def == JobDefOf.LayDown,
+                MentalState = pawn.MentalState?.def?.defName,
+                CanBeDrafted = pawn.drafter != null && !pawn.Downed && !pawn.InMentalState,
+                Weapon = pawn.equipment?.Primary?.def?.defName,
+                HasRangedWeapon = pawn.equipment?.Primary?.def?.IsRangedWeapon ?? false,
                 Needs = ExtractNeeds(pawn),
                 Skills = ExtractSkills(pawn),
                 WorkPriorities = ExtractWorkPriorities(pawn)
             };
+
+            // Compute reachability for all entities
+            if (entities != null && !pawn.Downed)
+            {
+                state.Reachable = ComputeReachable(pawn, map, entities);
+            }
+
+            return state;
+        }
+
+        private static List<string> ComputeReachable(Pawn pawn, Map map, EntityIndex entities)
+        {
+            var reachable = new List<string>();
+
+            // Check reachability to all entities (excluding self)
+            foreach (var entityRef in EntityExtractor.GetAllEntityIds(entities))
+            {
+                if (entityRef == pawn.ThingID) continue;
+
+                var target = map.listerThings.AllThings
+                    .FirstOrDefault(t => t.ThingID == entityRef);
+
+                if (target != null && pawn.CanReach(target, PathEndMode.Touch, Danger.Deadly))
+                {
+                    reachable.Add(entityRef);
+                }
+            }
+
+            return reachable;
         }
 
         private static Dictionary<string, float> ExtractNeeds(Pawn pawn)

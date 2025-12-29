@@ -3,9 +3,11 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
 using Verse;
+using Verse.AI;
 using RimWorld;
 using GameRL.Harmony;
 using GameRL.Harmony.Protocol;
@@ -42,6 +44,46 @@ namespace RimWorld.GameRL.State
 
         [Key("threats")]
         public List<ThreatInfo> Threats { get; set; } = new();
+
+        [Key("visitors")]
+        public List<VisitorState> Visitors { get; set; } = new();
+
+        [Key("entities")]
+        public EntityIndex Entities { get; set; } = new();
+
+        [Key("alerts")]
+        public List<string> Alerts { get; set; } = new();
+
+        [Key("temperature")]
+        public float Temperature { get; set; }
+
+        [Key("idle_colonists")]
+        public int IdleColonists { get; set; }
+    }
+
+    /// <summary>
+    /// Visitor/guest state for observations
+    /// </summary>
+    [MessagePackObject]
+    public class VisitorState
+    {
+        [Key("id")]
+        public string Id { get; set; } = "";
+
+        [Key("name")]
+        public string Name { get; set; } = "";
+
+        [Key("position")]
+        public float[] Position { get; set; } = new float[2];
+
+        [Key("faction")]
+        public string? Faction { get; set; }
+
+        [Key("relation")]
+        public string? Relation { get; set; }  // ally, neutral, etc.
+
+        [Key("health")]
+        public float Health { get; set; }
     }
 
     /// <summary>
@@ -73,19 +115,94 @@ namespace RimWorld.GameRL.State
         {
             var map = Find.CurrentMap;
 
+            var entities = EntityExtractor.Extract(map);
             var observation = new RimWorldObservation
             {
                 Tick = CurrentTick,
                 ColonistCount = map?.mapPawns.FreeColonistsCount ?? 0,
-                Colonists = ColonistExtractor.Extract(map),
+                Colonists = ColonistExtractor.Extract(map, entities),
                 Resources = ResourceExtractor.Extract(map),
                 Weather = map?.weatherManager.curWeather?.defName,
                 Season = map != null ? GenLocalDate.Season(map).ToString() : null,
                 Hour = map != null ? GenLocalDate.HourOfDay(map) : 0,
-                Threats = ExtractThreats(map)
+                Threats = ExtractThreats(map),
+                Visitors = ExtractVisitors(map),
+                Entities = entities,
+                Alerts = ExtractAlerts(),
+                Temperature = map != null ? map.mapTemperature.OutdoorTemp : 0f,
+                IdleColonists = CountIdleColonists(map)
             };
 
             return observation;
+        }
+
+        private List<VisitorState> ExtractVisitors(Map? map)
+        {
+            var visitors = new List<VisitorState>();
+            if (map == null) return visitors;
+
+            // Get all non-hostile, non-colonist humanlike pawns on the map
+            var visitorPawns = map.mapPawns.AllPawnsSpawned
+                .Where(p => p.RaceProps.Humanlike
+                    && p.Faction != null
+                    && p.Faction != Faction.OfPlayer
+                    && !p.HostileTo(Faction.OfPlayer)
+                    && !p.IsPrisoner);
+
+            foreach (var pawn in visitorPawns)
+            {
+                var factionRelation = pawn.Faction?.RelationKindWith(Faction.OfPlayer);
+                visitors.Add(new VisitorState
+                {
+                    Id = pawn.ThingID,
+                    Name = pawn.LabelShort,
+                    Position = new float[] { pawn.Position.x, pawn.Position.z },
+                    Faction = pawn.Faction?.Name,
+                    Relation = factionRelation?.ToString(),
+                    Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f
+                });
+            }
+
+            return visitors;
+        }
+
+        private List<string> ExtractAlerts()
+        {
+            var alerts = new List<string>();
+            try
+            {
+                var uiRoot = Find.UIRoot as UIRoot_Play;
+                var alertsReadout = uiRoot?.alerts;
+                if (alertsReadout == null) return alerts;
+
+                // Access active alerts via reflection (AlertsReadout.activeAlerts is private)
+                var activeAlertsField = typeof(AlertsReadout).GetField("activeAlerts",
+                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
+                if (activeAlertsField?.GetValue(alertsReadout) is List<Alert> activeAlerts)
+                {
+                    foreach (var alert in activeAlerts)
+                    {
+                        var label = alert.GetLabel();
+                        if (!string.IsNullOrEmpty(label))
+                        {
+                            alerts.Add(label);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[GameRL] Failed to extract alerts: {ex.Message}");
+            }
+            return alerts;
+        }
+
+        private int CountIdleColonists(Map? map)
+        {
+            if (map == null) return 0;
+
+            return map.mapPawns.FreeColonists
+                .Count(p => !p.Downed && !p.InMentalState && p.CurJob?.def == JobDefOf.Wait_Wander);
         }
 
         private List<ThreatInfo> ExtractThreats(Map? map)
