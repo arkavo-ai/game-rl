@@ -118,6 +118,9 @@ namespace GameRL.Harmony
                     _clientSocket?.Dispose();
                     _clientSocket = null;
 
+                    // Clear any stale messages from previous session
+                    while (_incomingQueue.TryDequeue(out _)) { }
+
                     Log("Client disconnected, waiting for new connection...");
                 }
                 catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted)

@@ -11,11 +11,12 @@ pub enum Action {
     Discrete(i64),
     /// Continuous action vector
     Continuous(Vec<f64>),
-    /// Parameterized action
+    /// Parameterized action with type field and flattened params
     Parameterized {
         #[serde(rename = "type")]
         action_type: String,
-        #[serde(default)]
+        /// All other fields become params (flattened for natural JSON format)
+        #[serde(flatten, default)]
         params: HashMap<String, serde_json::Value>,
     },
     /// No-op action
@@ -95,4 +96,46 @@ pub enum ParamDefinition {
     Position { dimensions: usize },
     /// Entity reference
     EntityId,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parameterized_action_flat_params() {
+        // MCP sends flat format - params should be captured via flatten
+        let json = r#"{"type": "set_work_priority", "colonist_id": "Human917", "work_type": "Hunting", "priority": 1}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized { action_type, params } => {
+                assert_eq!(action_type, "set_work_priority");
+                assert_eq!(params.get("colonist_id").unwrap(), "Human917");
+                assert_eq!(params.get("work_type").unwrap(), "Hunting");
+                assert_eq!(params.get("priority").unwrap(), 1);
+            }
+            _ => panic!("Expected Parameterized action, got {:?}", action),
+        }
+
+        // Verify serialization preserves flat format
+        let serialized = serde_json::to_string(&action).unwrap();
+        println!("Serialized: {}", serialized);
+        assert!(serialized.contains("\"colonist_id\":\"Human917\""), "Should have flat colonist_id");
+        assert!(!serialized.contains("\"params\":"), "Should NOT have nested params");
+    }
+
+    #[test]
+    fn test_wait_action() {
+        let json = r#"{"type": "wait"}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized { action_type, params } => {
+                assert_eq!(action_type, "wait");
+                assert!(params.is_empty());
+            }
+            _ => panic!("Expected Parameterized action for wait, got {:?}", action),
+        }
+    }
 }

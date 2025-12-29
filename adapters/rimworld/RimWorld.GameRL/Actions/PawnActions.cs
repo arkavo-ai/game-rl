@@ -92,7 +92,23 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            pawn.workSettings?.SetPriority(workDef, priority);
+            if (pawn.workSettings == null)
+            {
+                Log.Warning($"[GameRL] set_work_priority: workSettings is null for {pawn.LabelShort}");
+                return;
+            }
+
+            // Ensure manual priorities are enabled (required for SetPriority to work)
+            if (!Current.Game.playSettings.useWorkPriorities)
+            {
+                Current.Game.playSettings.useWorkPriorities = true;
+                Log.Message("[GameRL] Enabled manual work priorities");
+            }
+
+            var oldPriority = pawn.workSettings.GetPriority(workDef);
+            pawn.workSettings.SetPriority(workDef, priority);
+            var newPriority = pawn.workSettings.GetPriority(workDef);
+            Log.Message($"[GameRL] set_work_priority: {pawn.LabelShort} {workType} {oldPriority} -> {newPriority}");
         }
 
         /// <summary>

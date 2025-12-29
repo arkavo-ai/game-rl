@@ -398,18 +398,23 @@ struct UnixStreamWrapper(tokio::net::UnixStream);
 #[async_trait]
 impl AsyncStream for UnixStreamWrapper {
     async fn read_message(&mut self) -> Result<Vec<u8>> {
+        use tokio::time::timeout;
+
+        // Timeout for IPC reads - 120 seconds to allow for large tick counts
+        const READ_TIMEOUT: Duration = Duration::from_secs(120);
+
         // Read length-prefixed message
         let mut len_bytes = [0u8; 4];
-        self.0
-            .read_exact(&mut len_bytes)
+        timeout(READ_TIMEOUT, self.0.read_exact(&mut len_bytes))
             .await
+            .map_err(|_| GameRLError::IpcError("Read timeout (120s) - game may be processing large tick count".into()))?
             .map_err(|e| GameRLError::IpcError(format!("Read length failed: {}", e)))?;
         let len = u32::from_le_bytes(len_bytes) as usize;
 
         let mut data = vec![0u8; len];
-        self.0
-            .read_exact(&mut data)
+        timeout(READ_TIMEOUT, self.0.read_exact(&mut data))
             .await
+            .map_err(|_| GameRLError::IpcError("Read timeout (120s) - game may be processing large tick count".into()))?
             .map_err(|e| GameRLError::IpcError(format!("Read data failed: {}", e)))?;
 
         Ok(data)
