@@ -63,6 +63,9 @@ namespace RimWorld.GameRL.State
 
         [Key("item_counts")]
         public Dictionary<string, int> ItemCounts { get; set; } = new();
+
+        [Key("buildings")]
+        public List<EntityRef> Buildings { get; set; } = new();
     }
 
     /// <summary>
@@ -175,6 +178,23 @@ namespace RimWorld.GameRL.State
             }
             index.ItemCounts = foodCounts;
 
+            // Process player-owned buildings (especially production buildings)
+            foreach (var building in map.listerBuildings.allBuildingsColonist)
+            {
+                // Focus on workbenches and production buildings
+                if (building is IBillGiver)
+                {
+                    index.Buildings.Add(new EntityRef
+                    {
+                        Id = building.ThingID,
+                        Type = building.def.defName,
+                        Label = building.LabelShort,
+                        Position = new[] { building.Position.x, building.Position.z },
+                        Faction = building.Faction?.Name
+                    });
+                }
+            }
+
             _extractTimer.Stop();
             var elapsed = _extractTimer.ElapsedMilliseconds;
             if (elapsed > 50) // More than 50ms is concerning
@@ -213,7 +233,8 @@ namespace RimWorld.GameRL.State
                 .Concat(index.Prisoners.Select(e => e.Id))
                 .Concat(index.Corpses.Select(e => e.Id))
                 .Concat(index.Weapons.Select(e => e.Id))
-                .Concat(index.Items.Select(e => e.Id));
+                .Concat(index.Items.Select(e => e.Id))
+                .Concat(index.Buildings.Select(e => e.Id));
         }
     }
 }

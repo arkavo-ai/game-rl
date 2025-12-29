@@ -317,5 +317,85 @@ namespace RimWorld.GameRL.Actions
 
             Log.Message($"[GameRL] designate_mine: Marked {count} cells for mining around ({x},{z})");
         }
+
+        /// <summary>
+        /// Add a bill to a workbench (e.g., butcher creature at butcher spot)
+        /// </summary>
+        [GameRLAction("add_bill", Description = "Add a production bill to a workbench")]
+        public static void AddBill(
+            [GameRLParam("building_id")] Thing building,
+            [GameRLParam("recipe")] string recipeDefName,
+            int count = -1)
+        {
+            if (building == null)
+            {
+                Log.Warning("[GameRL] add_bill: Building not found");
+                return;
+            }
+
+            var billGiver = building as IBillGiver;
+            if (billGiver == null)
+            {
+                Log.Warning($"[GameRL] add_bill: {building.ThingID} cannot accept bills");
+                return;
+            }
+
+            var recipeDef = DefDatabase<RecipeDef>.GetNamed(recipeDefName, errorOnFail: false);
+            if (recipeDef == null)
+            {
+                Log.Warning($"[GameRL] add_bill: Unknown recipe: {recipeDefName}");
+                return;
+            }
+
+            // Check if recipe can be done at this building
+            if (!recipeDef.AvailableOnNow(building, null))
+            {
+                Log.Warning($"[GameRL] add_bill: Recipe {recipeDefName} not available at {building.LabelShort}");
+                return;
+            }
+
+            var bill = BillUtility.MakeNewBill(recipeDef);
+            if (bill is Bill_Production prodBill)
+            {
+                if (count > 0)
+                {
+                    prodBill.repeatMode = BillRepeatModeDefOf.RepeatCount;
+                    prodBill.repeatCount = count;
+                }
+                else
+                {
+                    prodBill.repeatMode = BillRepeatModeDefOf.Forever;
+                }
+            }
+
+            billGiver.BillStack.AddBill(bill);
+            Log.Message($"[GameRL] add_bill: Added {recipeDefName} to {building.LabelShort}");
+        }
+
+        /// <summary>
+        /// List all buildings that can accept bills (workbenches, production spots)
+        /// </summary>
+        [GameRLAction("list_workbenches", Description = "List all workbenches and production buildings")]
+        public static string ListWorkbenches()
+        {
+            var map = Find.CurrentMap;
+            if (map == null) return "No map";
+
+            var result = new System.Text.StringBuilder();
+            var workbenches = map.listerBuildings.allBuildingsColonist
+                .Where(b => b is IBillGiver)
+                .ToList();
+
+            foreach (var wb in workbenches)
+            {
+                var billGiver = wb as IBillGiver;
+                var recipes = wb.def.AllRecipes?.Select(r => r.defName) ?? Enumerable.Empty<string>();
+                result.AppendLine($"{wb.ThingID}: {wb.LabelShort} at ({wb.Position.x},{wb.Position.z})");
+                result.AppendLine($"  Recipes: {string.Join(", ", recipes.Take(5))}...");
+            }
+
+            Log.Message($"[GameRL] list_workbenches: Found {workbenches.Count} workbenches");
+            return result.ToString();
+        }
     }
 }
