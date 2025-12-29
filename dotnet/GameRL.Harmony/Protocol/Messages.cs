@@ -79,6 +79,15 @@ namespace GameRL.Harmony.Protocol
     }
 
     /// <summary>
+    /// Batch step result for multiple agents
+    /// </summary>
+    public class BatchStepResultMessage : GameMessage
+    {
+        public override string Type => "batch_step_result";
+        public List<StepResultMessage> Results { get; set; } = new();
+    }
+
+    /// <summary>
     /// Reset complete with initial observation
     /// </summary>
     public class ResetCompleteMessage : GameMessage
@@ -164,6 +173,16 @@ namespace GameRL.Harmony.Protocol
     }
 
     /// <summary>
+    /// Configure vision streams
+    /// </summary>
+    public class ConfigureStreamsMessage : GameMessage
+    {
+        public override string Type => "configure_streams";
+        public string AgentId { get; set; } = "";
+        public string Profile { get; set; } = "default";
+    }
+
+    /// <summary>
     /// Reset environment
     /// </summary>
     public class ResetMessage : GameMessage
@@ -187,6 +206,16 @@ namespace GameRL.Harmony.Protocol
     public class ShutdownMessage : GameMessage
     {
         public override string Type => "shutdown";
+    }
+
+    /// <summary>
+    /// Vision stream configuration response
+    /// </summary>
+    public class StreamsConfiguredMessage : GameMessage
+    {
+        public override string Type => "streams_configured";
+        public string AgentId { get; set; } = "";
+        public List<Dictionary<string, object>> Descriptors { get; set; } = new();
     }
 
     // ═══════════════════════════════════════════════════════════════════════════

@@ -50,7 +50,7 @@ This is a Rust workspace for multi-agent AI infrastructure in games. The project
 
 - **game-rl-client** - Reference client for spawning and connecting to game environments. Used for testing and examples.
 
-- **harmony-bridge** - IPC bridge between Rust MCP server and .NET games (via Harmony mod framework). Uses MessagePack over Unix sockets (named pipes on Windows).
+- **harmony-bridge** - IPC bridge between Rust MCP server and .NET games (via Harmony mod framework). Uses JSON over Unix sockets (named pipes on Windows).
 
 ### Key Traits
 
@@ -77,7 +77,7 @@ pub trait GameEnvironment: Send + Sync {
 ### Wire Protocols
 
 - **MCP Layer**: JSON-RPC 2.0 over stdio (agents ↔ game-rl-server)
-- **IPC Layer**: MessagePack over Unix sockets (game-rl-server ↔ .NET games)
+- **IPC Layer**: JSON over Unix sockets (game-rl-server ↔ .NET games)
 
 ## Constraints
 

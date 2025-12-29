@@ -5,71 +5,50 @@ using System.Linq;
 using Verse;
 using Verse.AI;
 using RimWorld;
-using MessagePack;
 
 namespace RimWorld.GameRL.State
 {
     /// <summary>
     /// Colonist state for observations
     /// </summary>
-    [MessagePackObject]
     public class ColonistState
     {
-        [Key("id")]
         public string Id { get; set; } = "";
 
-        [Key("name")]
         public string Name { get; set; } = "";
 
-        [Key("position")]
         public float[] Position { get; set; } = new float[2];
 
-        [Key("health")]
         public float Health { get; set; }
 
-        [Key("mood")]
         public float Mood { get; set; }
 
-        [Key("hunger")]
         public float Hunger { get; set; }
 
-        [Key("rest")]
         public float Rest { get; set; }
 
-        [Key("current_job")]
         public string? CurrentJob { get; set; }
 
-        [Key("is_drafted")]
         public bool IsDrafted { get; set; }
 
-        [Key("is_downed")]
         public bool IsDowned { get; set; }
 
-        [Key("is_sleeping")]
         public bool IsSleeping { get; set; }
 
-        [Key("mental_state")]
         public string? MentalState { get; set; }
 
-        [Key("can_be_drafted")]
         public bool CanBeDrafted { get; set; }
 
-        [Key("reachable")]
         public List<string> Reachable { get; set; } = new();
 
-        [Key("weapon")]
         public string? Weapon { get; set; }
 
-        [Key("has_ranged_weapon")]
         public bool HasRangedWeapon { get; set; }
 
-        [Key("needs")]
         public Dictionary<string, float> Needs { get; set; } = new();
 
-        [Key("skills")]
         public Dictionary<string, int> Skills { get; set; } = new();
 
-        [Key("work_priorities")]
         public Dictionary<string, int> WorkPriorities { get; set; } = new();
     }
 

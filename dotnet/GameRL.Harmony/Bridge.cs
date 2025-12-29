@@ -34,6 +34,7 @@ namespace GameRL.Harmony
         public event Action<RegisterAgentMessage>? OnRegisterAgent;
         public event Action<DeregisterAgentMessage>? OnDeregisterAgent;
         public event Action<ExecuteActionMessage>? OnExecuteAction;
+        public event Action<ConfigureStreamsMessage>? OnConfigureStreams;
         public event Action<ResetMessage>? OnReset;
         public event Action<GetStateHashMessage>? OnGetStateHash;
         public event Action? OnShutdown;
@@ -230,6 +231,7 @@ namespace GameRL.Harmony
                     "register_agent" => ParseRegisterAgent(obj),
                     "deregister_agent" => ParseDeregisterAgent(obj),
                     "execute_action" => ParseExecuteAction(obj),
+                    "configure_streams" => ParseConfigureStreams(obj),
                     "reset" => ParseReset(obj),
                     "get_state_hash" => new GetStateHashMessage(),
                     "shutdown" => new ShutdownMessage(),
@@ -299,6 +301,15 @@ namespace GameRL.Harmony
             };
         }
 
+        private ConfigureStreamsMessage ParseConfigureStreams(JObject obj)
+        {
+            return new ConfigureStreamsMessage
+            {
+                AgentId = obj["agent_id"]?.ToString() ?? "",
+                Profile = obj["profile"]?.ToString() ?? "default"
+            };
+        }
+
         /// <summary>
         /// Process pending commands from the server. Call from main game thread.
         /// </summary>
@@ -318,6 +329,9 @@ namespace GameRL.Harmony
                             break;
                         case ExecuteActionMessage m:
                             OnExecuteAction?.Invoke(m);
+                            break;
+                        case ConfigureStreamsMessage m:
+                            OnConfigureStreams?.Invoke(m);
                             break;
                         case ResetMessage m:
                             OnReset?.Invoke(m);
@@ -388,6 +402,17 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
+        /// Send step results for multiple agents
+        /// </summary>
+        public void SendBatchStepResult(List<StepResultMessage> results)
+        {
+            Send(new BatchStepResultMessage
+            {
+                Results = results ?? new List<StepResultMessage>()
+            });
+        }
+
+        /// <summary>
         /// Send reset complete with initial observation
         /// </summary>
         public void SendResetComplete(object observation, string? stateHash = null)
@@ -419,6 +444,18 @@ namespace GameRL.Harmony
             Send(new StateHashMessage
             {
                 Hash = hash
+            });
+        }
+
+        /// <summary>
+        /// Send vision stream configuration response
+        /// </summary>
+        public void SendStreamsConfigured(string agentId, List<Dictionary<string, object>> descriptors)
+        {
+            Send(new StreamsConfiguredMessage
+            {
+                AgentId = agentId,
+                Descriptors = descriptors ?? new List<Dictionary<string, object>>()
             });
         }
 
@@ -488,15 +525,25 @@ namespace GameRL.Harmony
                     break;
 
                 case StepResultMessage m:
-                    obj["agent_id"] = m.AgentId;
-                    obj["observation"] = JToken.FromObject(m.Observation ?? new object());
-                    obj["reward"] = m.Reward;
-                    obj["reward_components"] = JToken.FromObject(m.RewardComponents ?? new Dictionary<string, double>());
-                    obj["done"] = m.Done;
-                    obj["truncated"] = m.Truncated;
-                    if (m.StateHash != null)
-                        obj["state_hash"] = m.StateHash;
+                {
+                    var stepObj = SerializeStepResult(m);
+                    foreach (var prop in stepObj)
+                    {
+                        obj[prop.Key] = prop.Value;
+                    }
                     break;
+                }
+
+                case BatchStepResultMessage m:
+                {
+                    var results = new JArray();
+                    foreach (var result in m.Results ?? new List<StepResultMessage>())
+                    {
+                        results.Add(SerializeStepResult(result));
+                    }
+                    obj["results"] = results;
+                    break;
+                }
 
                 case ResetCompleteMessage m:
                     obj["observation"] = JToken.FromObject(m.Observation ?? new object());
@@ -514,6 +561,11 @@ namespace GameRL.Harmony
                     obj["hash"] = m.Hash;
                     break;
 
+                case StreamsConfiguredMessage m:
+                    obj["agent_id"] = m.AgentId;
+                    obj["descriptors"] = JToken.FromObject(m.Descriptors ?? new List<Dictionary<string, object>>());
+                    break;
+
                 case ErrorMessage m:
                     obj["code"] = m.Code;
                     obj["message"] = m.Message;
@@ -527,6 +579,26 @@ namespace GameRL.Harmony
             }
 
             return obj.ToString(Formatting.None);
+        }
+
+        private static JObject SerializeStepResult(StepResultMessage message)
+        {
+            var obj = new JObject
+            {
+                ["agent_id"] = message.AgentId,
+                ["observation"] = JToken.FromObject(message.Observation ?? new object()),
+                ["reward"] = message.Reward,
+                ["reward_components"] = JToken.FromObject(message.RewardComponents ?? new Dictionary<string, double>()),
+                ["done"] = message.Done,
+                ["truncated"] = message.Truncated
+            };
+
+            if (message.StateHash != null)
+            {
+                obj["state_hash"] = message.StateHash;
+            }
+
+            return obj;
         }
 
         public void Dispose()

@@ -11,94 +11,68 @@ using Verse.AI;
 using RimWorld;
 using GameRL.Harmony;
 using GameRL.Harmony.Protocol;
-using MessagePack;
 
 namespace RimWorld.GameRL.State
 {
     /// <summary>
     /// Complete observation state
     /// </summary>
-    [MessagePackObject]
     public class RimWorldObservation
     {
-        [Key("tick")]
         public ulong Tick { get; set; }
 
-        [Key("colonist_count")]
         public int ColonistCount { get; set; }
 
-        [Key("colonists")]
         public List<ColonistState> Colonists { get; set; } = new();
 
-        [Key("resources")]
         public ResourceState Resources { get; set; } = new();
 
-        [Key("weather")]
         public string? Weather { get; set; }
 
-        [Key("season")]
         public string? Season { get; set; }
 
-        [Key("hour")]
         public int Hour { get; set; }
 
-        [Key("threats")]
         public List<ThreatInfo> Threats { get; set; } = new();
 
-        [Key("visitors")]
         public List<VisitorState> Visitors { get; set; } = new();
 
-        [Key("entities")]
         public EntityIndex Entities { get; set; } = new();
 
-        [Key("alerts")]
         public List<string> Alerts { get; set; } = new();
 
-        [Key("temperature")]
         public float Temperature { get; set; }
 
-        [Key("idle_colonists")]
         public int IdleColonists { get; set; }
     }
 
     /// <summary>
     /// Visitor/guest state for observations
     /// </summary>
-    [MessagePackObject]
     public class VisitorState
     {
-        [Key("id")]
         public string Id { get; set; } = "";
 
-        [Key("name")]
         public string Name { get; set; } = "";
 
-        [Key("position")]
         public float[] Position { get; set; } = new float[2];
 
-        [Key("faction")]
         public string? Faction { get; set; }
 
-        [Key("relation")]
         public string? Relation { get; set; }  // ally, neutral, etc.
 
-        [Key("health")]
         public float Health { get; set; }
     }
 
     /// <summary>
     /// Threat information
     /// </summary>
-    [MessagePackObject]
     public class ThreatInfo
     {
-        [Key("type")]
         public string Type { get; set; } = "";
 
-        [Key("severity")]
         public int Severity { get; set; }
 
-        [Key("count")]
         public int Count { get; set; }
     }
 

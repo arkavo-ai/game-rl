@@ -26,6 +26,5 @@
       <PrivateAssets>all</PrivateAssets>
       <ExcludeAssets>runtime</ExcludeAssets>
     </PackageReference>
-    <PackageReference Include="MessagePack" Version="2.5.140" />
   </ItemGroup>
 </Project>

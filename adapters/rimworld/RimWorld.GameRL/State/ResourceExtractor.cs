@@ -3,29 +3,22 @@
 using System.Collections.Generic;
 using Verse;
 using RimWorld;
-using MessagePack;
 
 namespace RimWorld.GameRL.State
 {
     /// <summary>
     /// Resource state for observations
     /// </summary>
-    [MessagePackObject]
     public class ResourceState
     {
-        [Key("stockpiles")]
         public Dictionary<string, int> Stockpiles { get; set; } = new();
 
-        [Key("silver")]
         public int Silver { get; set; }
 
-        [Key("total_wealth")]
         public float TotalWealth { get; set; }
 
-        [Key("food_days")]
         public int FoodDays { get; set; }
 
-        [Key("medicine_count")]
         public int MedicineCount { get; set; }
     }
 

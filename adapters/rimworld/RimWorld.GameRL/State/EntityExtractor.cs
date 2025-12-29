@@ -5,66 +5,48 @@ using System.Diagnostics;
 using System.Linq;
 using Verse;
 using RimWorld;
-using MessagePack;
 
 namespace RimWorld.GameRL.State
 {
     /// <summary>
     /// Lightweight entity reference for the entity index
     /// </summary>
-    [MessagePackObject]
     public class EntityRef
     {
-        [Key("id")]
         public string Id { get; set; } = "";
 
-        [Key("type")]
         public string Type { get; set; } = "";
 
-        [Key("label")]
         public string Label { get; set; } = "";
 
-        [Key("pos")]
         public int[] Position { get; set; } = new int[2];
 
-        [Key("faction")]
         public string? Faction { get; set; }
     }
 
     /// <summary>
     /// Categorized index of all targetable entities on the map
     /// </summary>
-    [MessagePackObject]
     public class EntityIndex
     {
-        [Key("colonists")]
         public List<EntityRef> Colonists { get; set; } = new();
 
-        [Key("visitors")]
         public List<EntityRef> Visitors { get; set; } = new();
 
-        [Key("hostiles")]
         public List<EntityRef> Hostiles { get; set; } = new();
 
-        [Key("animals")]
         public List<EntityRef> Animals { get; set; } = new();
 
-        [Key("prisoners")]
         public List<EntityRef> Prisoners { get; set; } = new();
 
-        [Key("corpses")]
         public List<EntityRef> Corpses { get; set; } = new();
 
-        [Key("weapons")]
         public List<EntityRef> Weapons { get; set; } = new();
 
-        [Key("items")]
         public List<EntityRef> Items { get; set; } = new();
 
-        [Key("item_counts")]
         public Dictionary<string, int> ItemCounts { get; set; } = new();
 
-        [Key("buildings")]
         public List<EntityRef> Buildings { get; set; } = new();
     }
 

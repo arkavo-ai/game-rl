@@ -1,6 +1,6 @@
 //! IPC communication with .NET games
 
-use crate::protocol::{GameCapabilities, GameMessage, deserialize, serialize};
+use crate::protocol::{GameCapabilities, GameMessage, StepResultPayload, deserialize, serialize};
 use async_trait::async_trait;
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
@@ -302,31 +302,34 @@ impl GameEnvironment for HarmonyBridge {
             })
             .await?;
 
-        match response {
-            GameMessage::StepResult {
-                agent_id,
-                observation,
-                reward,
-                reward_components,
-                done,
-                truncated,
-                state_hash,
-            } => Ok(StepResult {
-                agent_id,
+        fn build_step_result(payload: StepResultPayload) -> StepResult {
+            StepResult {
+                agent_id: payload.agent_id,
                 step_id: 0, // TODO: track step count
                 tick: 0,    // TODO: track tick
-                observation,
-                reward,
-                reward_components,
-                done,
-                truncated,
+                observation: payload.observation,
+                reward: payload.reward,
+                reward_components: payload.reward_components,
+                done: payload.done,
+                truncated: payload.truncated,
                 termination_reason: None,
                 events: vec![],
                 frame_ids: HashMap::new(),
                 available_actions: None,
                 metrics: None,
-                state_hash,
-            }),
+                state_hash: payload.state_hash,
+            }
+        }
+
+        match response {
+            GameMessage::StepResult { result } => Ok(build_step_result(result)),
+            GameMessage::BatchStepResult { results } => results
+                .into_iter()
+                .find(|result| &result.agent_id == agent_id)
+                .map(build_step_result)
+                .ok_or_else(|| {
+                    GameRLError::ProtocolError("BatchStepResult missing requested agent".into())
+                }),
             GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
                 "Error {}: {}",
                 code, message
@@ -363,11 +366,35 @@ impl GameEnvironment for HarmonyBridge {
 
     async fn configure_streams(
         &mut self,
-        _agent_id: &AgentId,
-        _profile: &str,
+        agent_id: &AgentId,
+        profile: &str,
     ) -> Result<Vec<StreamDescriptor>> {
-        // Vision streams not yet implemented for Harmony bridge
-        Ok(vec![])
+        let response = self
+            .request(GameMessage::ConfigureStreams {
+                agent_id: agent_id.clone(),
+                profile: profile.to_string(),
+            })
+            .await?;
+
+        match response {
+            GameMessage::StreamsConfigured {
+                agent_id: response_agent_id,
+                descriptors,
+            } => {
+                if &response_agent_id != agent_id {
+                    warn!(
+                        "StreamsConfigured agent mismatch: expected {}, got {}",
+                        agent_id, response_agent_id
+                    );
+                }
+                Ok(descriptors)
+            }
+            GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
+                "Error {}: {}",
+                code, message
+            ))),
+            _ => Err(GameRLError::ProtocolError("Unexpected response".into())),
+        }
     }
 
     async fn save_trajectory(&self, _path: &str) -> Result<()> {

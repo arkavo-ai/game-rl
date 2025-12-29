@@ -3,9 +3,23 @@
 //! Messages are serialized as JSON with internally-tagged enums.
 //! Format: {"type": "message_type", ...fields}
 
-use game_rl_core::{Action, AgentConfig, AgentId, AgentType, GameEvent, Observation};
+use game_rl_core::{Action, AgentConfig, AgentId, AgentType, GameEvent, Observation, StreamDescriptor};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+
+/// Step result payload for single-agent or batch responses
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StepResultPayload {
+    pub agent_id: AgentId,
+    pub observation: Observation,
+    pub reward: f64,
+    #[serde(default)]
+    pub reward_components: HashMap<String, f64>,
+    pub done: bool,
+    pub truncated: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub state_hash: Option<String>,
+}
 
 /// Messages sent between Rust bridge and C# game
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,14 +49,12 @@ pub enum GameMessage {
 
     /// Step result
     StepResult {
-        agent_id: AgentId,
-        observation: Observation,
-        reward: f64,
-        reward_components: HashMap<String, f64>,
-        done: bool,
-        truncated: bool,
-        state_hash: Option<String>,
+        #[serde(flatten)]
+        result: StepResultPayload,
     },
+
+    /// Batch step results for multiple agents
+    BatchStepResult { results: Vec<StepResultPayload> },
 
     /// Reset complete
     ResetComplete {
@@ -52,6 +64,12 @@ pub enum GameMessage {
 
     /// State hash response
     StateHash { hash: String },
+
+    /// Vision streams configured
+    StreamsConfigured {
+        agent_id: AgentId,
+        descriptors: Vec<StreamDescriptor>,
+    },
 
     /// Error response
     Error { code: i32, message: String },
@@ -82,6 +100,9 @@ pub enum GameMessage {
 
     /// Request state hash
     GetStateHash,
+
+    /// Configure vision streams
+    ConfigureStreams { agent_id: AgentId, profile: String },
 
     /// Shutdown the game
     Shutdown,
