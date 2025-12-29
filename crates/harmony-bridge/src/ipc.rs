@@ -165,11 +165,15 @@ impl HarmonyBridge {
 
         let data = stream.read_message().await?;
 
-        // Diagnostic logging
+        // Diagnostic logging - show raw bytes and JSON
+        let first_bytes: Vec<u8> = data.iter().take(20).cloned().collect();
         let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        info!("[C#→Rust] len={} json={}", data.len(), json_preview);
+        info!("[C#→Rust] len={} first_bytes={:?} json={}", data.len(), first_bytes, json_preview);
 
-        deserialize(&data).map_err(|e| GameRLError::SerializationError(e.to_string()))
+        deserialize(&data).map_err(|e| {
+            warn!("[C#→Rust] Deserialize failed: {}", e);
+            GameRLError::SerializationError(e.to_string())
+        })
     }
 
     /// Send a message to the game with reconnection support
