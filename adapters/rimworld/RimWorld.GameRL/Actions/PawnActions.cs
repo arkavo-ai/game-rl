@@ -18,11 +18,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Move a drafted pawn to a target position
         /// </summary>
-        [GameRLAction("move", Description = "Move a drafted pawn to target coordinates")]
+        [GameRLAction("Move", Description = "Move a drafted pawn to target coordinates")]
         public static void Move(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            int x,
-            int z)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z)
         {
             if (pawn == null)
             {
@@ -44,8 +44,8 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Draft a colonist for direct control
         /// </summary>
-        [GameRLAction("draft", Description = "Draft a colonist for direct control")]
-        public static void Draft([GameRLParam("colonist_id")] Pawn pawn)
+        [GameRLAction("Draft", Description = "Draft a colonist for direct control")]
+        public static void Draft([GameRLParam("ColonistId")] Pawn pawn)
         {
             if (pawn?.drafter == null)
             {
@@ -59,8 +59,8 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Undraft a colonist to resume normal behavior
         /// </summary>
-        [GameRLAction("undraft", Description = "Undraft a colonist")]
-        public static void Undraft([GameRLParam("colonist_id")] Pawn pawn)
+        [GameRLAction("Undraft", Description = "Undraft a colonist")]
+        public static void Undraft([GameRLParam("ColonistId")] Pawn pawn)
         {
             if (pawn?.drafter == null)
             {
@@ -74,11 +74,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Set work priority for a colonist
         /// </summary>
-        [GameRLAction("set_work_priority", Description = "Set work priority for a colonist")]
+        [GameRLAction("SetWorkPriority", Description = "Set work priority for a colonist")]
         public static void SetWorkPriority(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            [GameRLParam("work_type")] string workType,
-            int priority)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("WorkType")] string workType,
+            [GameRLParam("Priority")] int priority)
         {
             if (pawn == null)
             {
@@ -115,7 +115,7 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// No-op action (advance time without doing anything)
         /// </summary>
-        [GameRLAction("wait", Description = "Do nothing, just advance simulation")]
+        [GameRLAction("Wait", Description = "Do nothing, just advance simulation")]
         public static void Wait()
         {
             // No-op
@@ -124,10 +124,10 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Force a pawn to attack a target
         /// </summary>
-        [GameRLAction("attack", Description = "Force a drafted pawn to attack a target")]
+        [GameRLAction("Attack", Description = "Force a drafted pawn to attack a target")]
         public static void Attack(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            [GameRLParam("target_id")] Thing target)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("TargetId")] Thing target)
         {
             if (pawn == null || target == null)
             {
@@ -148,10 +148,10 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Force a pawn to pick up an item
         /// </summary>
-        [GameRLAction("haul", Description = "Force a pawn to haul an item to a stockpile")]
+        [GameRLAction("Haul", Description = "Force a pawn to haul an item to a stockpile")]
         public static void Haul(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            [GameRLParam("thing_id")] Thing thing)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("ThingId")] Thing thing)
         {
             if (pawn == null || thing == null)
             {
@@ -173,11 +173,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Move a pawn toward a target entity
         /// </summary>
-        [GameRLAction("move_to_entity", Description = "Move a pawn toward a target entity")]
+        [GameRLAction("MoveToEntity", Description = "Move a pawn toward a target entity")]
         public static void MoveToEntity(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            [GameRLParam("target_id")] Thing target,
-            int distance = 1)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("TargetId")] Thing target,
+            [GameRLParam("Distance")] int distance = 1)
         {
             if (pawn == null || target == null)
             {
@@ -209,10 +209,10 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Initiate social interaction with another pawn
         /// </summary>
-        [GameRLAction("chat", Description = "Initiate social interaction with target pawn")]
+        [GameRLAction("Chat", Description = "Initiate social interaction with target pawn")]
         public static void Chat(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            [GameRLParam("target_id")] Pawn target)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("TargetId")] Pawn target)
         {
             if (pawn == null || target == null)
             {
@@ -235,10 +235,10 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Equip a weapon
         /// </summary>
-        [GameRLAction("equip", Description = "Have a pawn equip a weapon")]
+        [GameRLAction("Equip", Description = "Have a pawn equip a weapon")]
         public static void Equip(
-            [GameRLParam("colonist_id")] Pawn pawn,
-            [GameRLParam("weapon_id")] Thing weapon)
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("WeaponId")] Thing weapon)
         {
             if (pawn == null || weapon == null)
             {

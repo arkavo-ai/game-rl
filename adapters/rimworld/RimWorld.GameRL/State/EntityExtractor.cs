@@ -19,7 +19,7 @@ namespace RimWorld.GameRL.State
 
         public string Label { get; set; } = "";
 
-        public int[] Position { get; set; } = new int[2];
+        public Position2D Position { get; set; } = new();
 
         public string? Faction { get; set; }
     }
@@ -111,7 +111,7 @@ namespace RimWorld.GameRL.State
                     Id = corpse.ThingID,
                     Type = "Corpse",
                     Label = corpse.LabelShort,
-                    Position = new[] { corpse.Position.x, corpse.Position.z },
+                    Position = new Position2D { X = corpse.Position.x, Y = corpse.Position.z },
                     Faction = (corpse as Corpse)?.InnerPawn?.Faction?.Name
                 });
             }
@@ -128,7 +128,7 @@ namespace RimWorld.GameRL.State
                         Id = weapon.ThingID,
                         Type = weapon.def.IsRangedWeapon ? "RangedWeapon" : "MeleeWeapon",
                         Label = weapon.LabelShort,
-                        Position = new[] { weapon.Position.x, weapon.Position.z },
+                        Position = new Position2D { X = weapon.Position.x, Y = weapon.Position.z },
                         Faction = null
                     });
                 }
@@ -153,7 +153,7 @@ namespace RimWorld.GameRL.State
                         Id = thing.ThingID,
                         Type = "Medicine",
                         Label = thing.LabelShort,
-                        Position = new[] { thing.Position.x, thing.Position.z },
+                        Position = new Position2D { X = thing.Position.x, Y = thing.Position.z },
                         Faction = null
                     });
                 }
@@ -171,7 +171,7 @@ namespace RimWorld.GameRL.State
                         Id = building.ThingID,
                         Type = building.def.defName,
                         Label = building.LabelShort,
-                        Position = new[] { building.Position.x, building.Position.z },
+                        Position = new Position2D { X = building.Position.x, Y = building.Position.z },
                         Faction = building.Faction?.Name
                     });
                 }
@@ -198,7 +198,7 @@ namespace RimWorld.GameRL.State
                 Id = pawn.ThingID,
                 Type = pawn.RaceProps.Humanlike ? "Human" : "Animal",
                 Label = pawn.LabelShort,
-                Position = new[] { pawn.Position.x, pawn.Position.z },
+                Position = new Position2D { X = pawn.Position.x, Y = pawn.Position.z },
                 Faction = pawn.Faction?.Name
             };
         }

@@ -79,11 +79,10 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            // Extract action type and parameters
-            var actionType = actionDict.TryGetValue("type", out var t) ? t?.ToString() : null;
-            var actionParams = actionDict.TryGetValue("params", out var p)
-                ? p as Dictionary<string, object>
-                : actionDict;
+            // Extract action type and parameters (Type is PascalCase from Rust)
+            var actionType = actionDict.TryGetValue("Type", out var t) ? t?.ToString() : null;
+            // Params are flattened into the action dict (not nested)
+            var actionParams = actionDict;
 
             if (string.IsNullOrEmpty(actionType))
             {

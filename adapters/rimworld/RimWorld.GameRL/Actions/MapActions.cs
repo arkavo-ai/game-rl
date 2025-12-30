@@ -17,8 +17,8 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Designate an animal for hunting
         /// </summary>
-        [GameRLAction("designate_hunt", Description = "Mark an animal for hunting")]
-        public static void DesignateHunt([GameRLParam("target_id")] Thing target)
+        [GameRLAction("DesignateHunt", Description = "Mark an animal for hunting")]
+        public static void DesignateHunt([GameRLParam("TargetId")] Thing target)
         {
             if (target == null)
             {
@@ -54,8 +54,8 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Remove hunt designation from an animal
         /// </summary>
-        [GameRLAction("cancel_hunt", Description = "Remove hunting designation from an animal")]
-        public static void CancelHunt([GameRLParam("target_id")] Thing target)
+        [GameRLAction("CancelHunt", Description = "Remove hunting designation from an animal")]
+        public static void CancelHunt([GameRLParam("TargetId")] Thing target)
         {
             if (target == null)
             {
@@ -77,13 +77,13 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Place a building blueprint for construction
         /// </summary>
-        [GameRLAction("place_blueprint", Description = "Place a building blueprint for construction")]
+        [GameRLAction("PlaceBlueprint", Description = "Place a building blueprint for construction")]
         public static void PlaceBlueprint(
-            [GameRLParam("building")] string buildingDefName,
-            int x,
-            int z,
-            int rotation = 0,
-            [GameRLParam("stuff")] string? stuffDefName = null)
+            [GameRLParam("Building")] string buildingDefName,
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Rotation")] int rotation = 0,
+            [GameRLParam("Stuff")] string? stuffDefName = null)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -135,13 +135,13 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Create a growing zone
         /// </summary>
-        [GameRLAction("create_growing_zone", Description = "Create a growing zone for farming")]
+        [GameRLAction("CreateGrowingZone", Description = "Create a growing zone for farming")]
         public static void CreateGrowingZone(
-            int x,
-            int z,
-            int width = 5,
-            int height = 5,
-            [GameRLParam("plant")] string? plantDefName = null)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Width")] int width = 5,
+            [GameRLParam("Height")] int height = 5,
+            [GameRLParam("Plant")] string? plantDefName = null)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -200,12 +200,12 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Create a stockpile zone
         /// </summary>
-        [GameRLAction("create_stockpile", Description = "Create a stockpile zone for storage")]
+        [GameRLAction("CreateStockpile", Description = "Create a stockpile zone for storage")]
         public static void CreateStockpile(
-            int x,
-            int z,
-            int width = 5,
-            int height = 5)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Width")] int width = 5,
+            [GameRLParam("Height")] int height = 5)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -247,11 +247,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Designate trees for cutting
         /// </summary>
-        [GameRLAction("designate_cut_plants", Description = "Designate plants/trees in an area for cutting")]
+        [GameRLAction("DesignateCutPlants", Description = "Designate plants/trees in an area for cutting")]
         public static void DesignateCutPlants(
-            int x,
-            int z,
-            int radius = 5)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Radius")] int radius = 5)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -284,11 +284,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Designate area for mining
         /// </summary>
-        [GameRLAction("designate_mine", Description = "Designate rocks/ore in an area for mining")]
+        [GameRLAction("DesignateMine", Description = "Designate rocks/ore in an area for mining")]
         public static void DesignateMine(
-            int x,
-            int z,
-            int radius = 3)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Radius")] int radius = 3)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -321,11 +321,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Add a bill to a workbench (e.g., butcher creature at butcher spot)
         /// </summary>
-        [GameRLAction("add_bill", Description = "Add a production bill to a workbench")]
+        [GameRLAction("AddBill", Description = "Add a production bill to a workbench")]
         public static void AddBill(
-            [GameRLParam("building_id")] Thing building,
-            [GameRLParam("recipe")] string recipeDefName,
-            int count = -1)
+            [GameRLParam("BuildingId")] Thing building,
+            [GameRLParam("Recipe")] string recipeDefName,
+            [GameRLParam("Count")] int count = -1)
         {
             if (building == null)
             {
@@ -375,7 +375,7 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// List all buildings that can accept bills (workbenches, production spots)
         /// </summary>
-        [GameRLAction("list_workbenches", Description = "List all workbenches and production buildings")]
+        [GameRLAction("ListWorkbenches", Description = "List all workbenches and production buildings")]
         public static string ListWorkbenches()
         {
             var map = Find.CurrentMap;

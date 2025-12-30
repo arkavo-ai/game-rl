@@ -19,35 +19,35 @@
     "type": "discrete_parameterized",
     "actions": [
       {
-        "name": "set_work_priority",
+        "name": "SetWorkPriority",
         "description": "Set work priority for a colonist",
         "params": {
-          "colonist_id": {"type": "entity_id"},
-          "work_type": {"type": "string"},
-          "priority": {"type": "int", "min": 0, "max": 4}
+          "ColonistId": {"type": "entity_id"},
+          "WorkType": {"type": "string"},
+          "Priority": {"type": "int", "min": 0, "max": 4}
         }
       },
       {
-        "name": "draft",
+        "name": "Draft",
         "description": "Draft a colonist for direct control",
-        "params": {"colonist_id": {"type": "entity_id"}}
+        "params": {"ColonistId": {"type": "entity_id"}}
       },
       {
-        "name": "undraft",
+        "name": "Undraft",
         "description": "Release a colonist from draft",
-        "params": {"colonist_id": {"type": "entity_id"}}
+        "params": {"ColonistId": {"type": "entity_id"}}
       },
       {
-        "name": "move",
+        "name": "Move",
         "description": "Move a drafted colonist to a position",
         "params": {
-          "colonist_id": {"type": "entity_id"},
-          "x": {"type": "int"},
-          "z": {"type": "int"}
+          "ColonistId": {"type": "entity_id"},
+          "X": {"type": "int"},
+          "Y": {"type": "int"}
         }
       },
       {
-        "name": "wait",
+        "name": "Wait",
         "description": "Do nothing this step",
         "params": {}
       }
