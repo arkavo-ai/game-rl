@@ -205,7 +205,7 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
-        /// Deserialize incoming JSON message based on "type" field
+        /// Deserialize incoming JSON message based on "Type" field (PascalCase)
         /// </summary>
         private GameMessage? DeserializeMessage(byte[] data)
         {
@@ -218,23 +218,23 @@ namespace GameRL.Harmony
                 Log($"[C#←Rust] len={data.Length} json={preview}");
 
                 var obj = JObject.Parse(json);
-                var type = obj["type"]?.ToString();
+                var type = obj["Type"]?.ToString();
 
                 if (string.IsNullOrEmpty(type))
                 {
-                    LogError("Message missing 'type' field");
+                    LogError("Message missing 'Type' field");
                     return null;
                 }
 
                 return type switch
                 {
-                    "register_agent" => ParseRegisterAgent(obj),
-                    "deregister_agent" => ParseDeregisterAgent(obj),
-                    "execute_action" => ParseExecuteAction(obj),
-                    "configure_streams" => ParseConfigureStreams(obj),
-                    "reset" => ParseReset(obj),
-                    "get_state_hash" => new GetStateHashMessage(),
-                    "shutdown" => new ShutdownMessage(),
+                    "RegisterAgent" => ParseRegisterAgent(obj),
+                    "DeregisterAgent" => ParseDeregisterAgent(obj),
+                    "ExecuteAction" => ParseExecuteAction(obj),
+                    "ConfigureStreams" => ParseConfigureStreams(obj),
+                    "Reset" => ParseReset(obj),
+                    "GetStateHash" => new GetStateHashMessage(),
+                    "Shutdown" => new ShutdownMessage(),
                     _ => null
                 };
             }
@@ -249,17 +249,17 @@ namespace GameRL.Harmony
         {
             var msg = new RegisterAgentMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? "",
-                AgentType = obj["agent_type"]?.ToString() ?? ""
+                AgentId = obj["AgentId"]?.ToString() ?? "",
+                AgentType = obj["AgentType"]?.ToString() ?? ""
             };
 
-            var config = obj["config"] as JObject;
+            var config = obj["Config"] as JObject;
             if (config != null)
             {
                 msg.Config = new AgentConfig
                 {
-                    EntityId = config["entity_id"]?.ToString(),
-                    ObservationProfile = config["observation_profile"]?.ToString() ?? "default"
+                    EntityId = config["EntityId"]?.ToString(),
+                    ObservationProfile = config["ObservationProfile"]?.ToString() ?? "default"
                 };
             }
 
@@ -270,7 +270,7 @@ namespace GameRL.Harmony
         {
             return new DeregisterAgentMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? ""
+                AgentId = obj["AgentId"]?.ToString() ?? ""
             };
         }
 
@@ -278,7 +278,7 @@ namespace GameRL.Harmony
         {
             // Convert JToken action to Dictionary for HarmonyRPC dispatch
             object? action = null;
-            var actionToken = obj["action"];
+            var actionToken = obj["Action"];
             if (actionToken != null && actionToken.Type != JTokenType.Null)
             {
                 action = actionToken.ToObject<Dictionary<string, object>>();
@@ -286,9 +286,9 @@ namespace GameRL.Harmony
 
             return new ExecuteActionMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? "",
+                AgentId = obj["AgentId"]?.ToString() ?? "",
                 Action = action,
-                Ticks = obj["ticks"]?.ToObject<uint>() ?? 1
+                Ticks = obj["Ticks"]?.ToObject<uint>() ?? 1
             };
         }
 
@@ -296,8 +296,8 @@ namespace GameRL.Harmony
         {
             return new ResetMessage
             {
-                Seed = obj["seed"]?.ToObject<ulong?>(),
-                Scenario = obj["scenario"]?.ToString()
+                Seed = obj["Seed"]?.ToObject<ulong?>(),
+                Scenario = obj["Scenario"]?.ToString()
             };
         }
 
@@ -305,8 +305,8 @@ namespace GameRL.Harmony
         {
             return new ConfigureStreamsMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? "",
-                Profile = obj["profile"]?.ToString() ?? "default"
+                AgentId = obj["AgentId"]?.ToString() ?? "",
+                Profile = obj["Profile"]?.ToString() ?? "default"
             };
         }
 
@@ -503,24 +503,24 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
-        /// Serialize message to JSON with "type" field for Rust serde compatibility
+        /// Serialize message to JSON with "Type" field for Rust serde compatibility (PascalCase)
         /// </summary>
         private string SerializeMessage(GameMessage message)
         {
             var obj = new JObject();
-            obj["type"] = message.Type;
+            obj["Type"] = message.Type;
 
             switch (message)
             {
                 case ReadyMessage m:
-                    obj["name"] = m.Name;
-                    obj["version"] = m.Version;
-                    obj["capabilities"] = JObject.FromObject(new
+                    obj["Name"] = m.Name;
+                    obj["Version"] = m.Version;
+                    obj["Capabilities"] = JObject.FromObject(new
                     {
-                        multi_agent = m.Capabilities.MultiAgent,
-                        max_agents = m.Capabilities.MaxAgents,
-                        deterministic = m.Capabilities.Deterministic,
-                        headless = m.Capabilities.Headless
+                        MultiAgent = m.Capabilities.MultiAgent,
+                        MaxAgents = m.Capabilities.MaxAgents,
+                        Deterministic = m.Capabilities.Deterministic,
+                        Headless = m.Capabilities.Headless
                     });
                     break;
 
@@ -541,40 +541,40 @@ namespace GameRL.Harmony
                     {
                         results.Add(SerializeStepResult(result));
                     }
-                    obj["results"] = results;
+                    obj["Results"] = results;
                     break;
                 }
 
                 case ResetCompleteMessage m:
-                    obj["observation"] = JToken.FromObject(m.Observation ?? new object());
+                    obj["Observation"] = JToken.FromObject(m.Observation ?? new object());
                     if (m.StateHash != null)
-                        obj["state_hash"] = m.StateHash;
+                        obj["StateHash"] = m.StateHash;
                     break;
 
                 case AgentRegisteredMessage m:
-                    obj["agent_id"] = m.AgentId;
-                    obj["observation_space"] = JToken.FromObject(m.ObservationSpace ?? new object());
-                    obj["action_space"] = JToken.FromObject(m.ActionSpace ?? new object());
+                    obj["AgentId"] = m.AgentId;
+                    obj["ObservationSpace"] = JToken.FromObject(m.ObservationSpace ?? new object());
+                    obj["ActionSpace"] = JToken.FromObject(m.ActionSpace ?? new object());
                     break;
 
                 case StateHashMessage m:
-                    obj["hash"] = m.Hash;
+                    obj["Hash"] = m.Hash;
                     break;
 
                 case StreamsConfiguredMessage m:
-                    obj["agent_id"] = m.AgentId;
-                    obj["descriptors"] = JToken.FromObject(m.Descriptors ?? new List<Dictionary<string, object>>());
+                    obj["AgentId"] = m.AgentId;
+                    obj["Descriptors"] = JToken.FromObject(m.Descriptors ?? new List<Dictionary<string, object>>());
                     break;
 
                 case ErrorMessage m:
-                    obj["code"] = m.Code;
-                    obj["message"] = m.Message;
+                    obj["Code"] = m.Code;
+                    obj["Message"] = m.Message;
                     break;
 
                 case StateUpdateMessage m:
-                    obj["tick"] = m.Tick;
-                    obj["state"] = JToken.FromObject(m.State ?? new object());
-                    obj["events"] = JToken.FromObject(m.Events ?? new List<GameEvent>());
+                    obj["Tick"] = m.Tick;
+                    obj["State"] = JToken.FromObject(m.State ?? new object());
+                    obj["Events"] = JToken.FromObject(m.Events ?? new List<GameEvent>());
                     break;
             }
 
@@ -585,17 +585,17 @@ namespace GameRL.Harmony
         {
             var obj = new JObject
             {
-                ["agent_id"] = message.AgentId,
-                ["observation"] = JToken.FromObject(message.Observation ?? new object()),
-                ["reward"] = message.Reward,
-                ["reward_components"] = JToken.FromObject(message.RewardComponents ?? new Dictionary<string, double>()),
-                ["done"] = message.Done,
-                ["truncated"] = message.Truncated
+                ["AgentId"] = message.AgentId,
+                ["Observation"] = JToken.FromObject(message.Observation ?? new object()),
+                ["Reward"] = message.Reward,
+                ["RewardComponents"] = JToken.FromObject(message.RewardComponents ?? new Dictionary<string, double>()),
+                ["Done"] = message.Done,
+                ["Truncated"] = message.Truncated
             };
 
             if (message.StateHash != null)
             {
-                obj["state_hash"] = message.StateHash;
+                obj["StateHash"] = message.StateHash;
             }
 
             return obj;

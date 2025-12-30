@@ -1,5 +1,6 @@
 // Wire protocol messages matching harmony-bridge/src/protocol.rs
 // Uses JSON with serde-compatible tagging
+// PascalCase throughout for LLM-friendly natural language readability
 
 using System;
 using System.Collections.Generic;
@@ -8,7 +9,7 @@ namespace GameRL.Harmony.Protocol
 {
     /// <summary>
     /// Base class for all protocol messages.
-    /// Rust uses #[serde(tag = "type", rename_all = "snake_case")]
+    /// Rust uses #[serde(tag = "Type", rename_all = "PascalCase")]
     /// </summary>
     public abstract class GameMessage
     {
@@ -24,7 +25,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ReadyMessage : GameMessage
     {
-        public override string Type => "ready";
+        public override string Type => "Ready";
         public string Name { get; set; } = "";
         public string Version { get; set; } = "";
         public GameCapabilities Capabilities { get; set; } = new();
@@ -46,7 +47,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class StateUpdateMessage : GameMessage
     {
-        public override string Type => "state_update";
+        public override string Type => "StateUpdate";
         public ulong Tick { get; set; }
         public object? State { get; set; }
         public List<GameEvent> Events { get; set; } = new();
@@ -57,7 +58,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class AgentRegisteredMessage : GameMessage
     {
-        public override string Type => "agent_registered";
+        public override string Type => "AgentRegistered";
         public string AgentId { get; set; } = "";
         public object? ObservationSpace { get; set; }
         public object? ActionSpace { get; set; }
@@ -68,7 +69,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class StepResultMessage : GameMessage
     {
-        public override string Type => "step_result";
+        public override string Type => "StepResult";
         public string AgentId { get; set; } = "";
         public object? Observation { get; set; }
         public double Reward { get; set; }
@@ -83,7 +84,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class BatchStepResultMessage : GameMessage
     {
-        public override string Type => "batch_step_result";
+        public override string Type => "BatchStepResult";
         public List<StepResultMessage> Results { get; set; } = new();
     }
 
@@ -92,7 +93,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ResetCompleteMessage : GameMessage
     {
-        public override string Type => "reset_complete";
+        public override string Type => "ResetComplete";
         public object? Observation { get; set; }
         public string? StateHash { get; set; }
     }
@@ -102,7 +103,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class StateHashMessage : GameMessage
     {
-        public override string Type => "state_hash";
+        public override string Type => "StateHash";
         public string Hash { get; set; } = "";
     }
 
@@ -111,7 +112,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ErrorMessage : GameMessage
     {
-        public override string Type => "error";
+        public override string Type => "Error";
         public int Code { get; set; }
         public string Message { get; set; } = "";
     }
@@ -125,7 +126,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class RegisterAgentMessage : GameMessage
     {
-        public override string Type => "register_agent";
+        public override string Type => "RegisterAgent";
         public string AgentId { get; set; } = "";
         public string AgentType { get; set; } = "";
         public AgentConfig Config { get; set; } = new();
@@ -157,7 +158,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class DeregisterAgentMessage : GameMessage
     {
-        public override string Type => "deregister_agent";
+        public override string Type => "DeregisterAgent";
         public string AgentId { get; set; } = "";
     }
 
@@ -166,7 +167,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ExecuteActionMessage : GameMessage
     {
-        public override string Type => "execute_action";
+        public override string Type => "ExecuteAction";
         public string AgentId { get; set; } = "";
         public object? Action { get; set; }
         public uint Ticks { get; set; }
@@ -177,7 +178,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ConfigureStreamsMessage : GameMessage
     {
-        public override string Type => "configure_streams";
+        public override string Type => "ConfigureStreams";
         public string AgentId { get; set; } = "";
         public string Profile { get; set; } = "default";
     }
@@ -187,7 +188,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ResetMessage : GameMessage
     {
-        public override string Type => "reset";
+        public override string Type => "Reset";
         public ulong? Seed { get; set; }
         public string? Scenario { get; set; }
     }
@@ -197,7 +198,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class GetStateHashMessage : GameMessage
     {
-        public override string Type => "get_state_hash";
+        public override string Type => "GetStateHash";
     }
 
     /// <summary>
@@ -205,7 +206,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class ShutdownMessage : GameMessage
     {
-        public override string Type => "shutdown";
+        public override string Type => "Shutdown";
     }
 
     /// <summary>
@@ -213,7 +214,7 @@ namespace GameRL.Harmony.Protocol
     /// </summary>
     public class StreamsConfiguredMessage : GameMessage
     {
-        public override string Type => "streams_configured";
+        public override string Type => "StreamsConfigured";
         public string AgentId { get; set; } = "";
         public List<Dictionary<string, object>> Descriptors { get; set; } = new();
     }

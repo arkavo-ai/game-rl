@@ -167,39 +167,39 @@ namespace RimWorld.GameRL.State
             {
                 return new Dictionary<string, object>
                 {
-                    ["stream_id"] = StreamId,
-                    ["width"] = Width,
-                    ["height"] = Height,
-                    ["pixel_format"] = "bgra8",
-                    ["ring_count"] = RingCount,
-                    ["transport"] = new Dictionary<string, object>
+                    ["StreamId"] = StreamId,
+                    ["Width"] = Width,
+                    ["Height"] = Height,
+                    ["PixelFormat"] = "bgra8",
+                    ["RingCount"] = RingCount,
+                    ["Transport"] = new Dictionary<string, object>
                     {
-                        ["type"] = "iosurface",
-                        ["surface_ids"] = new ulong[] { _surfaceId }
+                        ["Type"] = "IOSurface",
+                        ["SurfaceIds"] = new ulong[] { _surfaceId }
                     },
-                    ["sync"] = new Dictionary<string, object>
+                    ["Sync"] = new Dictionary<string, object>
                     {
-                        ["type"] = "polling"
+                        ["Type"] = "Polling"
                     }
                 };
             }
 
             return new Dictionary<string, object>
             {
-                ["stream_id"] = StreamId,
-                ["width"] = Width,
-                ["height"] = Height,
-                ["pixel_format"] = "rgba8",
-                ["ring_count"] = RingCount,
-                ["transport"] = new Dictionary<string, object>
+                ["StreamId"] = StreamId,
+                ["Width"] = Width,
+                ["Height"] = Height,
+                ["PixelFormat"] = "rgba8",
+                ["RingCount"] = RingCount,
+                ["Transport"] = new Dictionary<string, object>
                 {
-                    ["type"] = "shm",
-                    ["shm_name"] = ShmPath,
-                    ["offsets"] = new ulong[] { 0 }
+                    ["Type"] = "Shm",
+                    ["ShmName"] = ShmPath,
+                    ["Offsets"] = new ulong[] { 0 }
                 },
-                ["sync"] = new Dictionary<string, object>
+                ["Sync"] = new Dictionary<string, object>
                 {
-                    ["type"] = "polling"
+                    ["Type"] = "Polling"
                 }
             };
         }

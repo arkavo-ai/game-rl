@@ -1,7 +1,9 @@
 //! Wire protocol for Rust <-> C# communication
 //!
 //! Messages are serialized as JSON with internally-tagged enums.
-//! Format: {"type": "message_type", ...fields}
+//! Format: {"Type": "MessageType", ...fields}
+//!
+//! Uses PascalCase throughout for LLM-friendly natural language readability.
 
 use game_rl_core::{Action, AgentConfig, AgentId, AgentType, GameEvent, Observation, StreamDescriptor};
 use serde::{Deserialize, Serialize};
@@ -9,6 +11,7 @@ use std::collections::HashMap;
 
 /// Step result payload for single-agent or batch responses
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct StepResultPayload {
     pub agent_id: AgentId,
     pub observation: Observation,
@@ -22,28 +25,40 @@ pub struct StepResultPayload {
 }
 
 /// Messages sent between Rust bridge and C# game
+///
+/// Note: `rename_all` on enums only affects variant names, not field names inside variants.
+/// Each field must be explicitly renamed using `#[serde(rename = "...")]` for PascalCase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum GameMessage {
     // === C# -> Rust ===
     /// Game is ready and provides manifest
     Ready {
+        #[serde(rename = "Name")]
         name: String,
+        #[serde(rename = "Version")]
         version: String,
+        #[serde(rename = "Capabilities")]
         capabilities: GameCapabilities,
     },
 
     /// Current game state update
     StateUpdate {
+        #[serde(rename = "Tick")]
         tick: u64,
+        #[serde(rename = "State")]
         state: serde_json::Value,
+        #[serde(rename = "Events")]
         events: Vec<GameEvent>,
     },
 
     /// Agent registration response
     AgentRegistered {
+        #[serde(rename = "AgentId")]
         agent_id: AgentId,
+        #[serde(rename = "ObservationSpace")]
         observation_space: serde_json::Value,
+        #[serde(rename = "ActionSpace")]
         action_space: serde_json::Value,
     },
 
@@ -54,47 +69,73 @@ pub enum GameMessage {
     },
 
     /// Batch step results for multiple agents
-    BatchStepResult { results: Vec<StepResultPayload> },
+    BatchStepResult {
+        #[serde(rename = "Results")]
+        results: Vec<StepResultPayload>,
+    },
 
     /// Reset complete
     ResetComplete {
+        #[serde(rename = "Observation")]
         observation: Observation,
+        #[serde(rename = "StateHash")]
         state_hash: Option<String>,
     },
 
     /// State hash response
-    StateHash { hash: String },
+    StateHash {
+        #[serde(rename = "Hash")]
+        hash: String,
+    },
 
     /// Vision streams configured
     StreamsConfigured {
+        #[serde(rename = "AgentId")]
         agent_id: AgentId,
+        #[serde(rename = "Descriptors")]
         descriptors: Vec<StreamDescriptor>,
     },
 
     /// Error response
-    Error { code: i32, message: String },
+    Error {
+        #[serde(rename = "Code")]
+        code: i32,
+        #[serde(rename = "Message")]
+        message: String,
+    },
 
     // === Rust -> C# ===
     /// Register an agent
     RegisterAgent {
+        #[serde(rename = "AgentId")]
         agent_id: AgentId,
+        #[serde(rename = "AgentType")]
         agent_type: AgentType,
+        #[serde(rename = "Config")]
         config: AgentConfig,
     },
 
     /// Deregister an agent
-    DeregisterAgent { agent_id: AgentId },
+    DeregisterAgent {
+        #[serde(rename = "AgentId")]
+        agent_id: AgentId,
+    },
 
     /// Execute an action
     ExecuteAction {
+        #[serde(rename = "AgentId")]
         agent_id: AgentId,
+        #[serde(rename = "Action")]
         action: Action,
+        #[serde(rename = "Ticks")]
         ticks: u32,
     },
 
     /// Reset environment
     Reset {
+        #[serde(rename = "Seed")]
         seed: Option<u64>,
+        #[serde(rename = "Scenario")]
         scenario: Option<String>,
     },
 
@@ -102,7 +143,12 @@ pub enum GameMessage {
     GetStateHash,
 
     /// Configure vision streams
-    ConfigureStreams { agent_id: AgentId, profile: String },
+    ConfigureStreams {
+        #[serde(rename = "AgentId")]
+        agent_id: AgentId,
+        #[serde(rename = "Profile")]
+        profile: String,
+    },
 
     /// Shutdown the game
     Shutdown,
@@ -110,6 +156,7 @@ pub enum GameMessage {
 
 /// Game capabilities sent during Ready
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct GameCapabilities {
     pub multi_agent: bool,
     pub max_agents: usize,
@@ -154,14 +201,41 @@ mod tests {
     }
 
     #[test]
+    fn test_ready_from_csharp() {
+        // Exact JSON from C# logs
+        let json = r#"{"Type":"Ready","Name":"RimWorld","Version":"1.6.4633","Capabilities":{"MultiAgent":true,"MaxAgents":8,"Deterministic":true,"Headless":false}}"#;
+        println!("Testing JSON: {}", json);
+        println!("JSON length: {}", json.len());
+
+        let result: Result<GameMessage, _> = serde_json::from_str(json);
+        match result {
+            Ok(msg) => {
+                println!("Deserialized successfully: {:?}", msg);
+                match msg {
+                    GameMessage::Ready { name, version, capabilities } => {
+                        assert_eq!(name, "RimWorld");
+                        assert_eq!(version, "1.6.4633");
+                        assert!(capabilities.multi_agent);
+                        assert_eq!(capabilities.max_agents, 8);
+                    }
+                    _ => panic!("Wrong message type"),
+                }
+            }
+            Err(e) => {
+                panic!("Deserialization failed: {}", e);
+            }
+        }
+    }
+
+    #[test]
     fn test_get_state_hash_format() {
         let msg = GameMessage::GetStateHash;
         let bytes = serialize(&msg).unwrap();
         let json = String::from_utf8_lossy(&bytes);
 
-        // Should be JSON with type field
+        // Should be JSON with Type field in PascalCase
         println!("GetStateHash json: {}", json);
-        assert!(json.contains("\"type\":\"get_state_hash\""), "Should contain type field");
+        assert!(json.contains("\"Type\":\"GetStateHash\""), "Should contain Type field in PascalCase");
 
         // Verify it can roundtrip
         let decoded: GameMessage = deserialize(&bytes).unwrap();
