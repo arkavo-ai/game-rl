@@ -25,6 +25,11 @@ namespace RimWorld.GameRL.Actions
         private int _episodeStartTick;
         private const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
 
+        /// <summary>
+        /// Last action result for RL feedback
+        /// </summary>
+        public ActionResult? LastActionResult { get; private set; }
+
         public RimWorldCommandExecutor()
         {
             // Initialize HarmonyRPC with RimWorld logging
@@ -67,7 +72,7 @@ namespace RimWorld.GameRL.Actions
         {
             if (action == null)
             {
-                Log.Warning("[GameRL] Null action received");
+                LastActionResult = ActionResult.NoOp();
                 return;
             }
 
@@ -75,6 +80,8 @@ namespace RimWorld.GameRL.Actions
             var actionDict = action as Dictionary<string, object>;
             if (actionDict == null)
             {
+                LastActionResult = ActionResult.Fail("Unknown", ActionErrorCode.InternalError,
+                    $"Unknown action format: {action.GetType()}");
                 Log.Warning($"[GameRL] Unknown action format: {action.GetType()}");
                 return;
             }
@@ -87,11 +94,24 @@ namespace RimWorld.GameRL.Actions
             if (string.IsNullOrEmpty(actionType))
             {
                 // No action type = no-op (wait)
+                LastActionResult = ActionResult.NoOp();
+                return;
+            }
+
+            // Check if action exists
+            if (!_rpc.HasAction(actionType!))
+            {
+                LastActionResult = ActionResult.Fail(actionType!, ActionErrorCode.UnknownAction,
+                    $"Unknown action: {actionType}");
+                Log.Warning($"[GameRL] Unknown action: {actionType}");
                 return;
             }
 
             // Dispatch via HarmonyRPC - automatic method resolution and parameter binding
-            _rpc.Dispatch(actionType!, actionParams);
+            var success = _rpc.Dispatch(actionType!, actionParams);
+            LastActionResult = success
+                ? ActionResult.Ok(actionType!, "Action executed")
+                : ActionResult.Fail(actionType!, ActionErrorCode.InternalError, "Action dispatch failed");
         }
 
         public void Reset(ulong? seed, string? scenario)

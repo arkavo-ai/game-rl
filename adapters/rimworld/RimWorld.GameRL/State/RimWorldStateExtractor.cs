@@ -15,6 +15,20 @@ using GameRL.Harmony.Protocol;
 namespace RimWorld.GameRL.State
 {
     /// <summary>
+    /// Feedback from last action execution
+    /// </summary>
+    public class ActionFeedback
+    {
+        public bool Success { get; set; }
+
+        public string ActionType { get; set; } = "";
+
+        public string? Message { get; set; }
+
+        public string? ErrorCode { get; set; }
+    }
+
+    /// <summary>
     /// Complete observation state
     /// </summary>
     public class RimWorldObservation
@@ -44,6 +58,37 @@ namespace RimWorld.GameRL.State
         public float Temperature { get; set; }
 
         public int IdleColonists { get; set; }
+
+        /// <summary>
+        /// Feedback from the last action (for RL agents)
+        /// </summary>
+        public ActionFeedback? LastAction { get; set; }
+
+        /// <summary>
+        /// Episode metadata for RL context
+        /// </summary>
+        public EpisodeInfo? Episode { get; set; }
+    }
+
+    /// <summary>
+    /// Episode tracking info for RL
+    /// </summary>
+    public class EpisodeInfo
+    {
+        /// <summary>
+        /// Ticks since episode start
+        /// </summary>
+        public int TicksElapsed { get; set; }
+
+        /// <summary>
+        /// Maximum ticks before truncation (15 in-game days)
+        /// </summary>
+        public int MaxTicks { get; set; } = 60000 * 15;
+
+        /// <summary>
+        /// Progress through episode (0.0 to 1.0)
+        /// </summary>
+        public float Progress { get; set; }
     }
 
     /// <summary>
@@ -83,6 +128,21 @@ namespace RimWorld.GameRL.State
     {
         private readonly List<GameEvent> _pendingEvents = new();
 
+        /// <summary>
+        /// Last action result to include in observation (set by executor)
+        /// </summary>
+        public Actions.ActionResult? LastActionResult { get; set; }
+
+        /// <summary>
+        /// Episode start tick (set by executor on reset)
+        /// </summary>
+        public int EpisodeStartTick { get; set; }
+
+        /// <summary>
+        /// Max ticks per episode before truncation
+        /// </summary>
+        public const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
+
         public ulong CurrentTick => (ulong)(Find.TickManager?.TicksGame ?? 0);
 
         public object ExtractObservation(string agentId)
@@ -105,6 +165,28 @@ namespace RimWorld.GameRL.State
                 Alerts = ExtractAlerts(),
                 Temperature = map != null ? map.mapTemperature.OutdoorTemp : 0f,
                 IdleColonists = CountIdleColonists(map)
+            };
+
+            // Include last action feedback for RL
+            if (LastActionResult != null)
+            {
+                observation.LastAction = new ActionFeedback
+                {
+                    Success = LastActionResult.Success,
+                    ActionType = LastActionResult.ActionType,
+                    Message = LastActionResult.Message,
+                    ErrorCode = LastActionResult.ErrorCode?.ToString()
+                };
+            }
+
+            // Include episode metadata
+            var currentTick = Find.TickManager?.TicksGame ?? 0;
+            var ticksElapsed = currentTick - EpisodeStartTick;
+            observation.Episode = new EpisodeInfo
+            {
+                TicksElapsed = ticksElapsed,
+                MaxTicks = MaxEpisodeTicks,
+                Progress = (float)ticksElapsed / MaxEpisodeTicks
             };
 
             return observation;

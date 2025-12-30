@@ -215,6 +215,9 @@ namespace RimWorld.GameRL
             {
                 _commandExecutor?.Reset(msg.Seed, msg.Scenario);
 
+                // Track episode start for observations
+                _stateExtractor!.EpisodeStartTick = Find.TickManager?.TicksGame ?? 0;
+
                 object observation;
                 if (_agents.Count == 0)
                 {
@@ -323,6 +326,10 @@ namespace RimWorld.GameRL
                 {
                     stream.Capture();
                 }
+
+                // Pass action result to state extractor for observation
+                _stateExtractor.LastActionResult = _commandExecutor.LastActionResult;
+
                 var stateHash = _stateExtractor!.ComputeStateHash();
 
                 if (_agents.Count <= 1)
