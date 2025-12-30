@@ -115,26 +115,46 @@ namespace RimWorld.GameRL.State
             var visitors = new List<VisitorState>();
             if (map == null) return visitors;
 
-            // Get all non-hostile, non-colonist humanlike pawns on the map
-            var visitorPawns = map.mapPawns.AllPawnsSpawned
-                .Where(p => p.RaceProps.Humanlike
-                    && p.Faction != null
-                    && p.Faction != Faction.OfPlayer
-                    && !p.HostileTo(Faction.OfPlayer)
-                    && !p.IsPrisoner);
-
-            foreach (var pawn in visitorPawns)
+            // Snapshot to avoid collection modification during iteration
+            List<Pawn> pawnSnapshot;
+            try
             {
-                var factionRelation = pawn.Faction?.RelationKindWith(Faction.OfPlayer);
-                visitors.Add(new VisitorState
+                pawnSnapshot = map.mapPawns.AllPawnsSpawned.ToList();
+            }
+            catch
+            {
+                return visitors;
+            }
+
+            // Get all non-hostile, non-colonist humanlike pawns on the map
+            foreach (var pawn in pawnSnapshot)
+            {
+                if (pawn == null || pawn.Destroyed || !pawn.Spawned) continue;
+
+                try
                 {
-                    Id = pawn.ThingID,
-                    Name = pawn.LabelShort,
-                    Position = new float[] { pawn.Position.x, pawn.Position.z },
-                    Faction = pawn.Faction?.Name,
-                    Relation = factionRelation?.ToString(),
-                    Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f
-                });
+                    if (pawn.RaceProps.Humanlike
+                        && pawn.Faction != null
+                        && pawn.Faction != Faction.OfPlayer
+                        && !pawn.HostileTo(Faction.OfPlayer)
+                        && !pawn.IsPrisoner)
+                    {
+                        var factionRelation = pawn.Faction?.RelationKindWith(Faction.OfPlayer);
+                        visitors.Add(new VisitorState
+                        {
+                            Id = pawn.ThingID,
+                            Name = pawn.LabelShort,
+                            Position = new float[] { pawn.Position.x, pawn.Position.z },
+                            Faction = pawn.Faction?.Name,
+                            Relation = factionRelation?.ToString(),
+                            Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f
+                        });
+                    }
+                }
+                catch
+                {
+                    // Skip pawns that throw during extraction
+                }
             }
 
             return visitors;
@@ -154,12 +174,26 @@ namespace RimWorld.GameRL.State
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (activeAlertsField?.GetValue(alertsReadout) is List<Alert> activeAlerts)
                 {
-                    foreach (var alert in activeAlerts)
+                    // CRITICAL: Take a snapshot to avoid collection modified during iteration
+                    // The GUI thread can modify activeAlerts while we're reading it
+                    var alertSnapshot = activeAlerts.ToList();
+
+                    foreach (var alert in alertSnapshot)
                     {
-                        var label = alert.GetLabel();
-                        if (!string.IsNullOrEmpty(label))
+                        if (alert == null) continue;
+
+                        try
                         {
-                            alerts.Add(label);
+                            // GetLabel() can trigger GUI code that accesses null state
+                            var label = alert.GetLabel();
+                            if (!string.IsNullOrEmpty(label))
+                            {
+                                alerts.Add(label);
+                            }
+                        }
+                        catch
+                        {
+                            // Skip alerts that throw during GetLabel()
                         }
                     }
                 }
@@ -175,8 +209,16 @@ namespace RimWorld.GameRL.State
         {
             if (map == null) return 0;
 
-            return map.mapPawns.FreeColonists
-                .Count(p => !p.Downed && !p.InMentalState && p.CurJob?.def == JobDefOf.Wait_Wander);
+            try
+            {
+                // Take snapshot to avoid collection modification
+                var colonists = map.mapPawns.FreeColonists.ToList();
+                return colonists.Count(p => p != null && !p.Destroyed && !p.Downed && !p.InMentalState && p.CurJob?.def == JobDefOf.Wait_Wander);
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private List<ThreatInfo> ExtractThreats(Map? map)
@@ -184,32 +226,39 @@ namespace RimWorld.GameRL.State
             var threats = new List<ThreatInfo>();
             if (map == null) return threats;
 
-            // Count hostile pawns
-            var hostileCount = map.mapPawns.AllPawnsSpawned
-                .Where(p => p.HostileTo(Faction.OfPlayer))
-                .Count();
-
-            if (hostileCount > 0)
+            try
             {
-                threats.Add(new ThreatInfo
+                // Count hostile pawns - snapshot to avoid collection modification
+                var pawnSnapshot = map.mapPawns.AllPawnsSpawned.ToList();
+                var hostileCount = pawnSnapshot
+                    .Count(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer));
+
+                if (hostileCount > 0)
                 {
-                    Type = "hostile_pawns",
-                    Severity = hostileCount > 10 ? 3 : hostileCount > 5 ? 2 : 1,
-                    Count = hostileCount
-                });
+                    threats.Add(new ThreatInfo
+                    {
+                        Type = "hostile_pawns",
+                        Severity = hostileCount > 10 ? 3 : hostileCount > 5 ? 2 : 1,
+                        Count = hostileCount
+                    });
+                }
+
+                // Check for fires - snapshot to avoid collection modification
+                var fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire)?.ToList();
+                var fireCount = fires?.Count ?? 0;
+                if (fireCount > 0)
+                {
+                    threats.Add(new ThreatInfo
+                    {
+                        Type = "fire",
+                        Severity = fireCount > 20 ? 3 : fireCount > 5 ? 2 : 1,
+                        Count = fireCount
+                    });
+                }
             }
-
-            // Check for fires
-            var fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire);
-            var fireCount = fires?.Count ?? 0;
-            if (fireCount > 0)
+            catch
             {
-                threats.Add(new ThreatInfo
-                {
-                    Type = "fire",
-                    Severity = fireCount > 20 ? 3 : fireCount > 5 ? 2 : 1,
-                    Count = fireCount
-                });
+                // Return empty threats on error
             }
 
             return threats;
@@ -220,21 +269,37 @@ namespace RimWorld.GameRL.State
             var map = Find.CurrentMap;
             if (map == null) return "sha256:no-map";
 
-            var sb = new StringBuilder();
-
-            // Hash colonist positions and health
-            foreach (var pawn in map.mapPawns.FreeColonists)
+            try
             {
-                sb.Append($"{pawn.ThingID}:{pawn.Position}:{pawn.health.summaryHealth.SummaryHealthPercent:F2};");
+                var sb = new StringBuilder();
+
+                // Hash colonist positions and health - snapshot to avoid collection modification
+                var colonists = map.mapPawns.FreeColonists.ToList();
+                foreach (var pawn in colonists)
+                {
+                    if (pawn == null || pawn.Destroyed) continue;
+                    try
+                    {
+                        sb.Append($"{pawn.ThingID}:{pawn.Position}:{pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f:F2};");
+                    }
+                    catch
+                    {
+                        // Skip pawns that throw
+                    }
+                }
+
+                // Hash key resources
+                sb.Append($"wealth:{map.wealthWatcher?.WealthTotal ?? 0:F0};");
+                sb.Append($"tick:{Find.TickManager?.TicksGame ?? 0};");
+
+                using var sha = SHA256.Create();
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return $"sha256:{BitConverter.ToString(hash).Replace("-", "").ToLower()}";
             }
-
-            // Hash key resources
-            sb.Append($"wealth:{map.wealthWatcher.WealthTotal:F0};");
-            sb.Append($"tick:{Find.TickManager.TicksGame};");
-
-            using var sha = SHA256.Create();
-            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
-            return $"sha256:{BitConverter.ToString(hash).Replace("-", "").ToLower()}";
+            catch
+            {
+                return "sha256:error";
+            }
         }
 
         public List<GameEvent> CollectEvents()

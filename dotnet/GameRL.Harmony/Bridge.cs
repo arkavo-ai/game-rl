@@ -213,10 +213,6 @@ namespace GameRL.Harmony
             {
                 var json = Encoding.UTF8.GetString(data);
 
-                // Diagnostic logging
-                var preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
-                Log($"[C#←Rust] len={data.Length} json={preview}");
-
                 var obj = JObject.Parse(json);
                 var type = obj["Type"]?.ToString();
 
@@ -481,10 +477,6 @@ namespace GameRL.Harmony
                 // Serialize message to JSON
                 var json = SerializeMessage(message);
                 var data = Encoding.UTF8.GetBytes(json);
-
-                // Diagnostic logging
-                var preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
-                Log($"[C#→Rust] len={data.Length} json={preview}");
 
                 // Length prefix (4 bytes, little-endian to match Rust)
                 var lenBytes = BitConverter.GetBytes(data.Length);

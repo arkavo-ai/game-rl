@@ -82,8 +82,20 @@ namespace RimWorld.GameRL.State
 
         public void Capture()
         {
+            // Safety check: Don't capture during GUI phase to avoid OnGUI conflicts
+            if (Event.current != null && Event.current.type != EventType.Ignore)
+            {
+                return;
+            }
+
             var camera = ResolveCamera();
-            if (camera == null)
+            if (camera == null || !camera.isActiveAndEnabled)
+            {
+                return;
+            }
+
+            // Additional null checks for render state
+            if (_renderTexture == null || !_renderTexture.IsCreated())
             {
                 return;
             }

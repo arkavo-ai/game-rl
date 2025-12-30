@@ -78,9 +78,32 @@ namespace RimWorld.GameRL.State
             if (map == null)
                 return new List<ColonistState>();
 
-            return map.mapPawns.FreeColonists
-                .Select(p => ExtractPawn(p))
-                .ToList();
+            // Take snapshot to avoid collection modification during iteration
+            List<Pawn> colonistSnapshot;
+            try
+            {
+                colonistSnapshot = map.mapPawns.FreeColonists.ToList();
+            }
+            catch
+            {
+                return new List<ColonistState>();
+            }
+
+            var result = new List<ColonistState>();
+            foreach (var pawn in colonistSnapshot)
+            {
+                if (pawn == null || pawn.Destroyed || !pawn.Spawned) continue;
+
+                try
+                {
+                    result.Add(ExtractPawn(pawn));
+                }
+                catch
+                {
+                    // Skip pawns that throw during extraction
+                }
+            }
+            return result;
         }
 
         private static ColonistState ExtractPawn(Pawn pawn)

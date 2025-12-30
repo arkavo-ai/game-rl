@@ -128,8 +128,24 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            GenConstruct.PlaceBlueprintForBuild(buildingDef, pos, map, rot, Faction.OfPlayer, stuffDef);
-            Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} blueprint at {pos}");
+            // Check if this is a "spot" type building with no construction cost - place instantly
+            bool isInstantBuild = (buildingDef.costList == null || buildingDef.costList.Count == 0)
+                && buildingDef.costStuffCount <= 0;
+
+            if (isInstantBuild)
+            {
+                // Spawn the building directly (for ButcherSpot, Campfire, SleepingSpot, etc.)
+                var building = ThingMaker.MakeThing(buildingDef, stuffDef);
+                building.SetFaction(Faction.OfPlayer);
+                GenSpawn.Spawn(building, pos, map, rot);
+                Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} instantly at {pos}");
+            }
+            else
+            {
+                // Normal construction - create blueprint
+                GenConstruct.PlaceBlueprintForBuild(buildingDef, pos, map, rot, Faction.OfPlayer, stuffDef);
+                Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} blueprint at {pos}");
+            }
         }
 
         /// <summary>
@@ -396,6 +412,65 @@ namespace RimWorld.GameRL.Actions
 
             Log.Message($"[GameRL] list_workbenches: Found {workbenches.Count} workbenches");
             return result.ToString();
+        }
+
+        /// <summary>
+        /// Unforbid an item so colonists can interact with it
+        /// </summary>
+        [GameRLAction("Unforbid", Description = "Unforbid an item so colonists can use it")]
+        public static void Unforbid([GameRLParam("ThingId")] Thing thing)
+        {
+            if (thing == null)
+            {
+                Log.Warning("[GameRL] unforbid: Thing not found");
+                return;
+            }
+
+            if (thing.def.category != ThingCategory.Item)
+            {
+                Log.Warning($"[GameRL] unforbid: {thing.ThingID} is not an item");
+                return;
+            }
+
+            thing.SetForbidden(false, false);
+            Log.Message($"[GameRL] unforbid: Unforbid {thing.LabelShort}");
+        }
+
+        /// <summary>
+        /// Unforbid all items in a radius
+        /// </summary>
+        [GameRLAction("UnforbidArea", Description = "Unforbid all items in a radius")]
+        public static void UnforbidArea(
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Radius")] int radius = 10)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] unforbid_area: No current map");
+                return;
+            }
+
+            var center = new IntVec3(x, 0, z);
+            int count = 0;
+
+            foreach (var cell in GenRadial.RadialCellsAround(center, radius, true))
+            {
+                if (!cell.InBounds(map)) continue;
+
+                var things = cell.GetThingList(map);
+                foreach (var thing in things.ToList())
+                {
+                    if (thing.def.category == ThingCategory.Item && thing.IsForbidden(Faction.OfPlayer))
+                    {
+                        thing.SetForbidden(false, false);
+                        count++;
+                    }
+                }
+            }
+
+            Log.Message($"[GameRL] unforbid_area: Unforbid {count} items around ({x},{z})");
         }
     }
 }
