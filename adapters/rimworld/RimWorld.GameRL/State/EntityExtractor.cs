@@ -57,6 +57,8 @@ namespace RimWorld.GameRL.State
 
         public Dictionary<string, int> ItemCounts { get; set; } = new();
 
+        public Dictionary<string, int> ForbiddenItemCounts { get; set; } = new();
+
         public List<EntityRef> Buildings { get; set; } = new();
     }
 
@@ -218,6 +220,7 @@ namespace RimWorld.GameRL.State
             }
 
             var foodCounts = new Dictionary<string, int>();
+            var forbiddenCounts = new Dictionary<string, int>();
             foreach (var thing in allThingsSnapshot)
             {
                 if (thing == null || thing.Destroyed) continue;
@@ -230,6 +233,13 @@ namespace RimWorld.GameRL.State
                         var key = thing.def.defName;
                         if (!foodCounts.ContainsKey(key)) foodCounts[key] = 0;
                         foodCounts[key] += thing.stackCount;
+
+                        // Track forbidden items separately so agents know what to unforbid
+                        if (thing.IsForbidden(Faction.OfPlayer))
+                        {
+                            if (!forbiddenCounts.ContainsKey(key)) forbiddenCounts[key] = 0;
+                            forbiddenCounts[key] += thing.stackCount;
+                        }
                     }
                     else if (thing.def.IsMedicine && thing.Spawned)
                     {
@@ -251,6 +261,7 @@ namespace RimWorld.GameRL.State
                 }
             }
             index.ItemCounts = foodCounts;
+            index.ForbiddenItemCounts = forbiddenCounts;
 
             // Process player-owned buildings - focus on useful buildings, not ancient ruins
             var processedIds = new HashSet<string>();

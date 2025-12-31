@@ -426,9 +426,11 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            if (thing.def.category != ThingCategory.Item)
+            // Use SetForbidden which handles the check internally
+            // This works for items, corpses, and anything that can be forbidden
+            if (!thing.def.HasComp(typeof(CompForbiddable)) && thing.def.category != ThingCategory.Item)
             {
-                Log.Warning($"[GameRL] unforbid: {thing.ThingID} is not an item");
+                Log.Warning($"[GameRL] unforbid: {thing.ThingID} cannot be forbidden/unforbidden");
                 return;
             }
 
@@ -471,6 +473,117 @@ namespace RimWorld.GameRL.Actions
             }
 
             Log.Message($"[GameRL] unforbid_area: Unforbid {count} items around ({x},{z})");
+        }
+
+        /// <summary>
+        /// Unforbid all items of a specific type (e.g., MealSurvivalPack)
+        /// </summary>
+        [GameRLAction("UnforbidByType", Description = "Unforbid all items of a specific type (e.g., MealSurvivalPack)")]
+        public static void UnforbidByType([GameRLParam("DefName")] string defName)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] unforbid_by_type: No current map");
+                return;
+            }
+
+            var def = DefDatabase<ThingDef>.GetNamed(defName, errorOnFail: false);
+            if (def == null)
+            {
+                Log.Warning($"[GameRL] unforbid_by_type: Unknown def: {defName}");
+                return;
+            }
+
+            int count = 0;
+            foreach (var thing in map.listerThings.ThingsOfDef(def))
+            {
+                if (thing.IsForbidden(Faction.OfPlayer))
+                {
+                    thing.SetForbidden(false, false);
+                    count++;
+                }
+            }
+
+            Log.Message($"[GameRL] unforbid_by_type: Unforbid {count} {defName}");
+        }
+
+        /// <summary>
+        /// Remove a bill from a workbench
+        /// </summary>
+        [GameRLAction("CancelBill", Description = "Remove a bill from a workbench")]
+        public static void CancelBill(
+            [GameRLParam("BuildingId")] Thing building,
+            [GameRLParam("BillIndex")] int billIndex = 0)
+        {
+            if (building == null)
+            {
+                Log.Warning("[GameRL] cancel_bill: Building not found");
+                return;
+            }
+
+            var billGiver = building as IBillGiver;
+            if (billGiver == null)
+            {
+                Log.Warning($"[GameRL] cancel_bill: {building.ThingID} cannot accept bills");
+                return;
+            }
+
+            if (billIndex < 0 || billIndex >= billGiver.BillStack.Count)
+            {
+                Log.Warning($"[GameRL] cancel_bill: Bill index {billIndex} out of range (0-{billGiver.BillStack.Count - 1})");
+                return;
+            }
+
+            var bill = billGiver.BillStack[billIndex];
+            billGiver.BillStack.Delete(bill);
+            Log.Message($"[GameRL] cancel_bill: Removed bill {billIndex} from {building.LabelShort}");
+        }
+
+        /// <summary>
+        /// Modify a bill's repeat count or mode
+        /// </summary>
+        [GameRLAction("ModifyBill", Description = "Modify a bill's repeat count or mode")]
+        public static void ModifyBill(
+            [GameRLParam("BuildingId")] Thing building,
+            [GameRLParam("BillIndex")] int billIndex = 0,
+            [GameRLParam("Count")] int? count = null,
+            [GameRLParam("RepeatForever")] bool? repeatForever = null)
+        {
+            if (building == null)
+            {
+                Log.Warning("[GameRL] modify_bill: Building not found");
+                return;
+            }
+
+            var billGiver = building as IBillGiver;
+            if (billGiver == null)
+            {
+                Log.Warning($"[GameRL] modify_bill: {building.ThingID} cannot accept bills");
+                return;
+            }
+
+            if (billIndex < 0 || billIndex >= billGiver.BillStack.Count)
+            {
+                Log.Warning($"[GameRL] modify_bill: Bill index {billIndex} out of range");
+                return;
+            }
+
+            var bill = billGiver.BillStack[billIndex];
+            if (bill is Bill_Production prodBill)
+            {
+                if (repeatForever == true)
+                {
+                    prodBill.repeatMode = BillRepeatModeDefOf.Forever;
+                    Log.Message($"[GameRL] modify_bill: Set bill {billIndex} to repeat forever");
+                }
+                else if (count.HasValue)
+                {
+                    prodBill.repeatMode = BillRepeatModeDefOf.RepeatCount;
+                    prodBill.repeatCount = count.Value;
+                    Log.Message($"[GameRL] modify_bill: Set bill {billIndex} count to {count.Value}");
+                }
+            }
         }
     }
 }

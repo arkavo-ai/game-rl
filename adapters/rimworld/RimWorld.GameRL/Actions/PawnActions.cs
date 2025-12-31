@@ -257,5 +257,63 @@ namespace RimWorld.GameRL.Actions
             pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
             Log.Message($"[GameRL] equip: {pawn.LabelShort} going to equip {weapon.LabelShort}");
         }
+
+        /// <summary>
+        /// Set medical care level for a pawn
+        /// </summary>
+        [GameRLAction("SetMedicalCare", Description = "Set medical care level for a pawn")]
+        public static void SetMedicalCare(
+            [GameRLParam("ColonistId")] Pawn pawn,
+            [GameRLParam("CareLevel")] string careLevel)
+        {
+            if (pawn == null)
+            {
+                Log.Warning("[GameRL] set_medical_care: Pawn not found");
+                return;
+            }
+
+            if (pawn.playerSettings == null)
+            {
+                Log.Warning($"[GameRL] set_medical_care: {pawn.LabelShort} has no player settings");
+                return;
+            }
+
+            MedicalCareCategory care;
+            switch (careLevel.ToLower())
+            {
+                case "nocare":
+                case "no_care":
+                case "0":
+                    care = MedicalCareCategory.NoCare;
+                    break;
+                case "nomeds":
+                case "nomedication":
+                case "no_medication":
+                case "1":
+                    care = MedicalCareCategory.NoMeds;
+                    break;
+                case "herbal":
+                case "herbalonly":
+                case "2":
+                    care = MedicalCareCategory.HerbalOrWorse;
+                    break;
+                case "normal":
+                case "industrial":
+                case "3":
+                    care = MedicalCareCategory.NormalOrWorse;
+                    break;
+                case "best":
+                case "glitterworld":
+                case "4":
+                    care = MedicalCareCategory.Best;
+                    break;
+                default:
+                    Log.Warning($"[GameRL] set_medical_care: Unknown care level: {careLevel}. Use: nocare, nomeds, herbal, normal, or best");
+                    return;
+            }
+
+            pawn.playerSettings.medCare = care;
+            Log.Message($"[GameRL] set_medical_care: Set {pawn.LabelShort} to {care}");
+        }
     }
 }
