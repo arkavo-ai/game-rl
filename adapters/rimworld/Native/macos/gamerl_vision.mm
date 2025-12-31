@@ -58,7 +58,7 @@ extern "C" uint64_t gamerl_create_iosurface(int width, int height)
                                                                                         width:(NSUInteger)width
                                                                                        height:(NSUInteger)height
                                                                                     mipmapped:NO];
-        desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget | MTLTextureUsageBlit;
+        desc.usage = MTLTextureUsageShaderRead | MTLTextureUsageRenderTarget;
 
         id<MTLTexture> texture = [g_device newTextureWithDescriptor:desc iosurface:surface plane:0];
         if (texture == nil)

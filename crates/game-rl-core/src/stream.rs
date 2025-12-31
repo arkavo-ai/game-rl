@@ -51,11 +51,22 @@ pub struct StreamDescriptor {
 #[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum StreamTransport {
     /// macOS IOSurface
-    IOSurface { surface_ids: Vec<u64> },
+    IOSurface {
+        #[serde(rename = "SurfaceIds")]
+        surface_ids: Vec<u64>,
+    },
     /// POSIX shared memory
-    Shm { shm_name: String, offsets: Vec<u64> },
+    Shm {
+        #[serde(rename = "ShmName")]
+        shm_name: String,
+        #[serde(rename = "Offsets")]
+        offsets: Vec<u64>,
+    },
     /// Windows DXGI shared texture
-    Dxgi { shared_handles: Vec<u64> },
+    Dxgi {
+        #[serde(rename = "SharedHandles")]
+        shared_handles: Vec<u64>,
+    },
     /// Inline base64 (fallback, slow)
     Inline,
 }
@@ -64,9 +75,18 @@ pub enum StreamTransport {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum StreamSync {
-    MetalEvent { handle: u64 },
-    D3dFence { handle: u64 },
-    Semaphore { name: String },
+    MetalEvent {
+        #[serde(rename = "Handle")]
+        handle: u64,
+    },
+    D3dFence {
+        #[serde(rename = "Handle")]
+        handle: u64,
+    },
+    Semaphore {
+        #[serde(rename = "Name")]
+        name: String,
+    },
     Polling,
 }
 
