@@ -50,7 +50,10 @@ namespace RimWorld.GameRL.Actions
         public bool RegisterAgent(string agentId, string agentType, Dictionary<string, object> config)
         {
             if (_agents.ContainsKey(agentId))
-                return false;
+            {
+                Log.Message($"[GameRL] Agent already registered: {agentId} ({agentType})");
+                return true;
+            }
 
             _agents[agentId] = new AgentInfo
             {
