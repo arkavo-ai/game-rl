@@ -127,6 +127,16 @@ namespace RimWorld.GameRL.State
     public class RimWorldStateExtractor : IStateExtractor
     {
         private readonly List<GameEvent> _pendingEvents = new();
+        private readonly Dictionary<string, ulong> _lastEventTick = new();
+
+        // Rate limiting: minimum ticks between events of same type
+        private const int MinTicksBetweenSameEvent = 60;  // ~1 second at normal speed
+
+        // TTL: maximum age of events before they're dropped (in ticks)
+        private const int MaxEventAgeTicks = 2500;  // ~42 seconds at normal speed
+
+        // Maximum pending events to prevent memory bloat
+        private const int MaxPendingEvents = 100;
 
         /// <summary>
         /// Last action result to include in observation (set by executor)
@@ -386,20 +396,47 @@ namespace RimWorld.GameRL.State
 
         public List<GameEvent> CollectEvents()
         {
-            var events = new List<GameEvent>(_pendingEvents);
+            var now = CurrentTick;
+
+            // Filter out expired events (TTL enforcement)
+            var validEvents = _pendingEvents
+                .Where(e => now - e.Tick <= MaxEventAgeTicks)
+                .ToList();
+
             _pendingEvents.Clear();
-            return events;
+            return validEvents;
         }
 
         public void RecordEvent(string type, byte severity, object? details = null)
         {
+            var now = CurrentTick;
+
+            // Rate limiting: check if we've recorded this event type too recently
+            if (_lastEventTick.TryGetValue(type, out var lastTick))
+            {
+                if (now - lastTick < MinTicksBetweenSameEvent)
+                {
+                    // Skip this event due to rate limiting
+                    return;
+                }
+            }
+
+            // Enforce max pending events limit
+            if (_pendingEvents.Count >= MaxPendingEvents)
+            {
+                // Remove oldest event to make room
+                _pendingEvents.RemoveAt(0);
+            }
+
             _pendingEvents.Add(new GameEvent
             {
                 EventType = type,
-                Tick = CurrentTick,
+                Tick = now,
                 Severity = severity,
                 Details = details
             });
+
+            _lastEventTick[type] = now;
         }
 
         public object GetObservationSpace(string agentType)

@@ -25,6 +25,11 @@ namespace RimWorld.GameRL
         private static readonly Dictionary<string, AgentState> _agents = new();
         private static readonly Dictionary<string, VisionStreamManager> _visionStreams = new();
 
+        /// <summary>
+        /// Public accessor for state extractor (used by event capture patches)
+        /// </summary>
+        public static RimWorldStateExtractor? StateExtractor => _stateExtractor;
+
         // Step tracking
         private static ulong _currentStepId;
         private static string? _currentAgentId;
@@ -32,9 +37,19 @@ namespace RimWorld.GameRL
         private static bool _stepInProgress;
         private static bool _forcingTicks;
 
+        // Event push tracking
+        private static int _ticksSinceLastEventPush;
+        private const int EventPushIntervalTicks = 60; // Push events every ~1 second at normal speed
+
         static GameRLMod()
         {
-            Log.Message("[GameRL] Initializing RimWorld adapter...");
+            // Delay initialization to avoid interfering with def resolution
+            LongEventHandler.ExecuteWhenFinished(Initialize);
+        }
+
+        private static void Initialize()
+        {
+            Log.Message("[GameRL] Initializing Arkavo Game-RL adapter...");
 
             try
             {
@@ -310,6 +325,40 @@ namespace RimWorld.GameRL
                     CompleteStep();
                 }
             }
+
+            // Push events periodically (only when not in a step, to avoid interference)
+            if (!_stepInProgress && _stateExtractor != null && _bridge != null)
+            {
+                _ticksSinceLastEventPush++;
+                if (_ticksSinceLastEventPush >= EventPushIntervalTicks)
+                {
+                    PushPendingEvents();
+                    _ticksSinceLastEventPush = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Push any pending game events to the connected client
+        /// </summary>
+        private static void PushPendingEvents()
+        {
+            if (_stateExtractor == null || _bridge == null) return;
+
+            var events = _stateExtractor.CollectEvents();
+            if (events.Count == 0) return;
+
+            var tick = (ulong)(Find.TickManager?.TicksGame ?? 0);
+
+            // Build minimal state snapshot for events
+            var state = new Dictionary<string, object>
+            {
+                ["tick"] = tick,
+                ["colony_alive"] = Find.CurrentMap?.mapPawns?.FreeColonistsCount > 0
+            };
+
+            _bridge.SendStateUpdate(tick, state, events);
+            Log.Message($"[GameRL] Pushed {events.Count} events at tick {tick}");
         }
 
         private static void CompleteStep()
