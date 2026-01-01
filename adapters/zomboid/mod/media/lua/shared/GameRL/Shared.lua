@@ -4,8 +4,8 @@
 local GameRLShared = {}
 
 -- Version info
-GameRLShared.VERSION = "0.1.0"
-GameRLShared.PROTOCOL_VERSION = "1.0.0"
+GameRLShared.VERSION = "0.5.0"
+GameRLShared.PROTOCOL_VERSION = "0.5.0"
 
 -- Default configuration
 GameRLShared.Config = {

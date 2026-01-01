@@ -1,7 +1,7 @@
 {
     "name": "ProjectZomboid",
     "version": "41.78",
-    "game_rl_version": "1.0.0",
+    "game_rl_version": "0.5.0",
     "platform": "Java",
     "ipc": {
         "type": "tcp",

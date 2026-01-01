@@ -6,4 +6,4 @@ poster=poster.png
 url=https://github.com/arkavo-ai/game-rl
 require=
 versionMin=41.78
-modversion=0.1.0
+modversion=0.5.0

@@ -211,7 +211,7 @@ impl ZomboidBridge {
         GameManifest {
             name: self.game_name.clone(),
             version: self.game_version.clone(),
-            game_rl_version: "1.0.0".into(),
+            game_rl_version: "0.5.0".into(),
             capabilities: game_rl_core::Capabilities {
                 multi_agent: caps.multi_agent,
                 max_agents: caps.max_agents,
