@@ -62,20 +62,20 @@ jobs:
       - name: Smoke test - binary runs (Unix)
         if: runner.os != 'Windows'
         run: |
-          test -f target/release/game-rl-cli
+          test -f target/release/game-rl-server
           # Binary should start and wait for game (timeout after 2s is expected)
-          timeout 2 target/release/game-rl-cli 2>&1 || true
+          timeout 2 target/release/game-rl-server 2>&1 || true
           echo "Smoke test passed: binary executes"
 
       - name: Smoke test - binary runs (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          if (!(Test-Path target/release/game-rl-cli.exe)) {
+          if (!(Test-Path target/release/game-rl-server.exe)) {
             throw "Binary not found"
           }
           # Start process and kill after 2 seconds (binary waits for game)
-          $proc = Start-Process -FilePath "target/release/game-rl-cli.exe" -PassThru -NoNewWindow
+          $proc = Start-Process -FilePath "target/release/game-rl-server.exe" -PassThru -NoNewWindow
           Start-Sleep -Seconds 2
           if (!$proc.HasExited) {
             $proc.Kill()
