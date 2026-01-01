@@ -86,6 +86,12 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
+            if (string.IsNullOrEmpty(workType))
+            {
+                Log.Warning("[GameRL] set_work_priority: WorkType is required (e.g., Hauling, Cooking, Mining)");
+                return;
+            }
+
             var workDef = DefDatabase<WorkTypeDef>.GetNamed(workType, errorOnFail: false);
             if (workDef == null)
             {
@@ -269,6 +275,12 @@ namespace RimWorld.GameRL.Actions
             if (pawn == null)
             {
                 Log.Warning("[GameRL] set_medical_care: Pawn not found");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(careLevel))
+            {
+                Log.Warning("[GameRL] set_medical_care: CareLevel is required (nocare, nomeds, herbal, normal, or best)");
                 return;
             }
 

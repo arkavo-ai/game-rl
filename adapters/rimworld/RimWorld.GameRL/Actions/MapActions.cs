@@ -85,6 +85,12 @@ namespace RimWorld.GameRL.Actions
             [GameRLParam("Rotation")] int rotation = 0,
             [GameRLParam("Stuff")] string? stuffDefName = null)
         {
+            if (string.IsNullOrEmpty(buildingDefName))
+            {
+                Log.Warning("[GameRL] place_blueprint: Building parameter is required (e.g., Bed, ButcherSpot, Campfire)");
+                return;
+            }
+
             var map = Find.CurrentMap;
             if (map == null)
             {
@@ -349,6 +355,12 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
+            if (string.IsNullOrEmpty(recipeDefName))
+            {
+                Log.Warning("[GameRL] add_bill: Recipe is required (e.g., ButcherCorpseFlesh, Make_MealSimple)");
+                return;
+            }
+
             var billGiver = building as IBillGiver;
             if (billGiver == null)
             {
@@ -481,6 +493,12 @@ namespace RimWorld.GameRL.Actions
         [GameRLAction("UnforbidByType", Description = "Unforbid all items of a specific type (e.g., MealSurvivalPack)")]
         public static void UnforbidByType([GameRLParam("DefName")] string defName)
         {
+            if (string.IsNullOrEmpty(defName))
+            {
+                Log.Warning("[GameRL] unforbid_by_type: DefName is required (e.g., MealSurvivalPack, Steel, WoodLog)");
+                return;
+            }
+
             var map = Find.CurrentMap;
             if (map == null)
             {
