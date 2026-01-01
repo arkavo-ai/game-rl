@@ -4,7 +4,9 @@ members = [
     "crates/game-rl-core",
     "crates/game-rl-server",
     "crates/game-rl-client",
+    "crates/game-bridge",
     "crates/harmony-bridge",
+    "crates/zomboid-bridge",
 ]
 
 [workspace.package]
@@ -45,7 +47,9 @@ tokio-test = "0.4"
 game-rl-core = { path = "crates/game-rl-core" }
 game-rl-server = { path = "crates/game-rl-server" }
 game-rl-client = { path = "crates/game-rl-client" }
+game-bridge = { path = "crates/game-bridge" }
 harmony-bridge = { path = "crates/harmony-bridge" }
+zomboid-bridge = { path = "crates/zomboid-bridge" }
 
 [profile.release]
 lto = true

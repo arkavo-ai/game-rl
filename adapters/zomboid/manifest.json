@@ -1,0 +1,83 @@
+{
+    "name": "ProjectZomboid",
+    "version": "41.78",
+    "game_rl_version": "1.0.0",
+    "platform": "Java",
+    "ipc": {
+        "type": "tcp",
+        "host": "127.0.0.1",
+        "port": 19731
+    },
+    "capabilities": {
+        "multi_agent": true,
+        "max_agents": 8,
+        "deterministic": false,
+        "headless": false,
+        "save_replay": true,
+        "domain_randomization": true,
+        "variable_timestep": true
+    },
+    "agent_types": [
+        {
+            "name": "EntityBehavior",
+            "description": "Controls a single survivor",
+            "max_per_game": 4
+        },
+        {
+            "name": "ColonyManager",
+            "description": "High-level squad coordination",
+            "max_per_game": 1
+        }
+    ],
+    "observation_profiles": {
+        "minimal": {
+            "description": "Core survival stats only",
+            "estimated_size_kb": 1
+        },
+        "normal": {
+            "description": "Stats + nearby entities",
+            "estimated_size_kb": 10
+        },
+        "full": {
+            "description": "Complete situational awareness",
+            "estimated_size_kb": 50
+        }
+    },
+    "reward_components": [
+        {"name": "survivor_death", "range": [-100, 0], "description": "Penalty for survivor death"},
+        {"name": "survivor_infected", "range": [-50, 0], "description": "Penalty for infection"},
+        {"name": "survivor_rescued", "range": [0, 20], "description": "Bonus for recruiting survivors"},
+        {"name": "hunger", "range": [-0.5, 0], "description": "Penalty for hunger"},
+        {"name": "thirst", "range": [-0.5, 0], "description": "Penalty for thirst"},
+        {"name": "fatigue", "range": [-0.3, 0], "description": "Penalty for exhaustion"},
+        {"name": "health", "range": [-0.3, 0], "description": "Penalty for injuries"},
+        {"name": "stress", "range": [-0.2, 0], "description": "Penalty for stress"},
+        {"name": "zombie_killed", "range": [0, 5], "description": "Bonus for kills"},
+        {"name": "survivor_bitten", "range": [-25, 0], "description": "Penalty for bites"},
+        {"name": "area_discovered", "range": [0, 10], "description": "Bonus for exploration"},
+        {"name": "building_cleared", "range": [0, 5], "description": "Bonus for clearing buildings"},
+        {"name": "barricade_built", "range": [0, 0.5], "description": "Bonus for fortification"},
+        {"name": "food_security", "range": [-0.5, 0.5], "description": "Food reserves signal"},
+        {"name": "day_survived", "range": [0, 5], "description": "Bonus for surviving days"},
+        {"name": "week_survived", "range": [0, 5], "description": "Week milestone bonus"}
+    ],
+    "scenarios": [
+        {
+            "name": "loot_and_evade",
+            "description": "Single survivor must loot buildings and avoid zombies",
+            "difficulty": "easy"
+        },
+        {
+            "name": "base_building",
+            "description": "Establish and maintain a safehouse",
+            "difficulty": "medium"
+        },
+        {
+            "name": "squad_survival",
+            "description": "Coordinate a team of survivors for long-term survival",
+            "difficulty": "hard"
+        }
+    ],
+    "tick_rate": 60,
+    "max_episode_ticks": 1555200
+}

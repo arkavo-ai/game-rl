@@ -1,0 +1,55 @@
+plugins {
+    id 'java'
+}
+
+// Project Zomboid requires Java 17
+sourceCompatibility = '17'
+targetCompatibility = '17'
+
+// Configure paths (adjust PZ_HOME for your installation)
+def pzHome = System.getenv('PZ_HOME') ?: '/path/to/ProjectZomboid'
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // PZ ships with org.json
+    implementation 'org.json:json:20231013'
+
+    // Compile-only dependencies from PZ installation
+    compileOnly files("${pzHome}/zombie.jar")
+}
+
+sourceSets {
+    main {
+        java {
+            srcDirs = ['mod/java']
+        }
+    }
+}
+
+jar {
+    archiveFileName = 'GameRL.jar'
+    destinationDirectory = file("${projectDir}/mod/")
+
+    manifest {
+        attributes(
+            'Implementation-Title': 'GameRL',
+            'Implementation-Version': version
+        )
+    }
+}
+
+task installMod(type: Copy) {
+    from "${projectDir}/mod"
+    into "${pzHome}/mods/GameRL"
+
+    dependsOn jar
+}
+
+// Development task to copy just the JAR for quick iteration
+task updateJar(type: Copy) {
+    from jar
+    into "${pzHome}/mods/GameRL/"
+}

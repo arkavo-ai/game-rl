@@ -1,6 +1,6 @@
 [package]
-name = "harmony-bridge"
-description = "Bridge between Rust MCP server and .NET games via Harmony"
+name = "zomboid-bridge"
+description = "Bridge between Rust MCP server and Project Zomboid via Java mod"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "harmony-server"
+name = "zomboid-server"
 path = "src/main.rs"
 
 [dependencies]

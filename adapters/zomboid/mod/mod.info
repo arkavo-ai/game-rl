@@ -1,0 +1,9 @@
+name=GameRL
+id=GameRL
+description=AI/RL framework integration for Project Zomboid. Enables external agents to control survivors via Model Context Protocol (MCP).
+icon=icon.png
+poster=poster.png
+url=https://github.com/arkavo-ai/game-rl
+require=
+versionMin=41.78
+modversion=0.1.0

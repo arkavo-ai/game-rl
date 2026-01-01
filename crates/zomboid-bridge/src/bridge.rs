@@ -1,12 +1,10 @@
-//! IPC communication with .NET games
+//! Bridge to Project Zomboid via TCP
 
-use async_trait::async_trait;
 use game_bridge::{
-    GameCapabilities, GameMessage, StepResultPayload, serialize,
-    AsyncWriter, reader_task,
+    AsyncWriter, GameCapabilities, GameMessage, StepResultPayload,
+    reader_task, serialize,
+    tcp::{TcpReadWrapper, TcpWriteWrapper},
 };
-#[cfg(unix)]
-use game_bridge::unix::{UnixReadWrapper, UnixWriteWrapper};
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
@@ -15,13 +13,39 @@ use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
 use tracing::{debug, info, warn};
 
-/// Bridge to a .NET game via IPC
-pub struct HarmonyBridge {
-    /// Path to the socket/pipe
-    socket_path: String,
+/// Configuration for Zomboid bridge connection
+#[derive(Debug, Clone)]
+pub struct ZomboidConfig {
+    /// Host to connect to (default: 127.0.0.1)
+    pub host: String,
+    /// Port for main IPC channel (default: 19731)
+    pub port: u16,
+    /// Port for vision stream channel (default: 19732)
+    pub vision_port: u16,
+    /// Connection timeout
+    pub connect_timeout: Duration,
+}
+
+impl Default for ZomboidConfig {
+    fn default() -> Self {
+        Self {
+            host: "127.0.0.1".into(),
+            port: 19731,
+            vision_port: 19732,
+            connect_timeout: Duration::from_secs(30),
+        }
+    }
+}
+
+/// Bridge to Project Zomboid via TCP
+pub struct ZomboidBridge {
+    /// Connection configuration
+    config: ZomboidConfig,
     /// Writer half of the connection
     writer: Arc<Mutex<Option<Box<dyn AsyncWriter>>>>,
     /// Channel to send requests to the reader task
@@ -38,16 +62,19 @@ pub struct HarmonyBridge {
     _reader_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
+impl ZomboidBridge {
+    /// Create a new bridge with default configuration
+    pub fn new() -> Self {
+        Self::with_config(ZomboidConfig::default())
+    }
 
-impl HarmonyBridge {
-    /// Create a new bridge (not connected yet)
-    pub fn new(socket_path: &str) -> Self {
-        // Create channels
+    /// Create a new bridge with custom configuration
+    pub fn with_config(config: ZomboidConfig) -> Self {
         let (request_tx, _request_rx) = mpsc::channel(16);
         let (event_tx, _) = broadcast::channel(64);
 
         Self {
-            socket_path: socket_path.to_string(),
+            config,
             writer: Arc::new(Mutex::new(None)),
             request_tx,
             event_tx,
@@ -58,58 +85,54 @@ impl HarmonyBridge {
         }
     }
 
-    /// Connect to the game process
+    /// Connect to the Project Zomboid game process via TCP
     pub async fn connect(&mut self) -> Result<()> {
-        info!("Connecting to game at {}", self.socket_path);
+        let addr = format!("{}:{}", self.config.host, self.config.port);
+        info!("Connecting to Project Zomboid at {}", addr);
 
-        // Platform-specific connection
-        #[cfg(unix)]
+        // Connect with timeout
+        let stream = tokio::time::timeout(
+            self.config.connect_timeout,
+            TcpStream::connect(&addr),
+        )
+        .await
+        .map_err(|_| GameRLError::IpcError(format!("Connection timeout to {}", addr)))?
+        .map_err(|e| GameRLError::IpcError(format!("Failed to connect to {}: {}", addr, e)))?;
+
+        // Disable Nagle's algorithm for low latency
+        stream
+            .set_nodelay(true)
+            .map_err(|e| GameRLError::IpcError(format!("Failed to set TCP_NODELAY: {}", e)))?;
+
+        // Split into read/write halves
+        let (read_half, write_half) = stream.into_split();
+
+        // Store writer
         {
-            use tokio::net::UnixStream;
-            let stream = UnixStream::connect(&self.socket_path)
-                .await
-                .map_err(|e| GameRLError::IpcError(format!("Failed to connect: {}", e)))?;
-
-            // Split into read/write halves
-            let (read_half, write_half) = stream.into_split();
-
-            // Store writer
-            {
-                let mut guard = self.writer.lock().await;
-                *guard = Some(Box::new(UnixWriteWrapper(write_half)));
-            }
-
-            // Create new channels for this connection
-            let (request_tx, request_rx) = mpsc::channel(16);
-            self.request_tx = request_tx;
-
-            // Spawn background reader task
-            let event_tx = self.event_tx.clone();
-            let handle = tokio::spawn(reader_task(
-                UnixReadWrapper(read_half),
-                request_rx,
-                event_tx,
-            ));
-            self._reader_handle = Some(handle);
+            let mut guard = self.writer.lock().await;
+            *guard = Some(Box::new(TcpWriteWrapper(write_half)));
         }
 
-        #[cfg(windows)]
-        {
-            return Err(GameRLError::IpcError(
-                "Windows named pipes not yet implemented".into(),
-            ));
-        }
+        // Create new channels for this connection
+        let (request_tx, request_rx) = mpsc::channel(16);
+        self.request_tx = request_tx;
 
-        // Wait for Ready message by sending a dummy request that expects Ready
-        // The reader task will handle routing the response
+        // Spawn background reader task
+        let event_tx = self.event_tx.clone();
+        let handle = tokio::spawn(reader_task(
+            TcpReadWrapper(read_half),
+            request_rx,
+            event_tx,
+        ));
+        self._reader_handle = Some(handle);
+
+        // Wait for Ready message
         let (response_tx, response_rx) = oneshot::channel();
-        // Send an empty marker - the first message from the game is Ready
         self.request_tx
             .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
             .await
             .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
 
-        // Wait for Ready response
         let msg = response_rx
             .await
             .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
@@ -139,7 +162,7 @@ impl HarmonyBridge {
 
         // Log outgoing message
         let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        debug!("[Rust→C#] len={} json={}", data.len(), json_preview);
+        debug!("[Rust→PZ] len={} json={}", data.len(), json_preview);
 
         // Send through writer
         {
@@ -167,7 +190,7 @@ impl HarmonyBridge {
         let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
         let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        debug!("[Rust→C#] len={} json={}", data.len(), json_preview);
+        debug!("[Rust→PZ] len={} json={}", data.len(), json_preview);
 
         let mut guard = self.writer.lock().await;
         let writer = guard
@@ -179,8 +202,8 @@ impl HarmonyBridge {
     /// Get game manifest from capabilities
     pub fn manifest(&self) -> GameManifest {
         let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
-            multi_agent: false,
-            max_agents: 1,
+            multi_agent: true,
+            max_agents: 8,
             deterministic: false,
             headless: false,
         });
@@ -201,8 +224,14 @@ impl HarmonyBridge {
     }
 }
 
-#[async_trait]
-impl GameEnvironment for HarmonyBridge {
+impl Default for ZomboidBridge {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait::async_trait]
+impl GameEnvironment for ZomboidBridge {
     async fn register_agent(
         &mut self,
         agent_id: AgentId,
@@ -256,8 +285,8 @@ impl GameEnvironment for HarmonyBridge {
         fn build_step_result(payload: StepResultPayload) -> StepResult {
             StepResult {
                 agent_id: payload.agent_id,
-                step_id: 0, // TODO: track step count
-                tick: 0,    // TODO: track tick
+                step_id: 0,
+                tick: 0,
                 observation: payload.observation,
                 reward: payload.reward,
                 reward_components: payload.reward_components,
@@ -371,4 +400,3 @@ impl GameEnvironment for HarmonyBridge {
         Some(self.event_tx.subscribe())
     }
 }
-
