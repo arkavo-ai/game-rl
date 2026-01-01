@@ -2,10 +2,10 @@
 
 use async_trait::async_trait;
 #[cfg(unix)]
+use game_bridge::reader_task;
+#[cfg(unix)]
 use game_bridge::unix::{UnixReadWrapper, UnixWriteWrapper};
-use game_bridge::{
-    AsyncWriter, GameCapabilities, GameMessage, StepResultPayload, reader_task, serialize,
-};
+use game_bridge::{AsyncWriter, GameCapabilities, GameMessage, StepResultPayload, serialize};
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
@@ -91,43 +91,46 @@ impl HarmonyBridge {
             self._reader_handle = Some(handle);
         }
 
-        #[cfg(windows)]
+        #[cfg(not(unix))]
         {
             return Err(GameRLError::IpcError(
-                "Windows named pipes not yet implemented".into(),
+                "Only Unix sockets are supported (Windows named pipes not yet implemented)".into(),
             ));
         }
 
-        // Wait for Ready message by sending a dummy request that expects Ready
-        // The reader task will handle routing the response
-        let (response_tx, response_rx) = oneshot::channel();
-        // Send an empty marker - the first message from the game is Ready
-        self.request_tx
-            .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
-            .await
-            .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
+        #[cfg(unix)]
+        {
+            // Wait for Ready message by sending a dummy request that expects Ready
+            // The reader task will handle routing the response
+            let (response_tx, response_rx) = oneshot::channel();
+            // Send an empty marker - the first message from the game is Ready
+            self.request_tx
+                .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
+                .await
+                .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
 
-        // Wait for Ready response
-        let msg = response_rx
-            .await
-            .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
+            // Wait for Ready response
+            let msg = response_rx
+                .await
+                .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
 
-        match msg {
-            GameMessage::Ready {
-                name,
-                version,
-                capabilities,
-            } => {
-                info!("Connected to {} v{}", name, version);
-                self.game_name = name;
-                self.game_version = version;
-                self.capabilities = Some(capabilities);
-                Ok(())
+            match msg {
+                GameMessage::Ready {
+                    name,
+                    version,
+                    capabilities,
+                } => {
+                    info!("Connected to {} v{}", name, version);
+                    self.game_name = name;
+                    self.game_version = version;
+                    self.capabilities = Some(capabilities);
+                    Ok(())
+                }
+                _ => Err(GameRLError::ProtocolError(format!(
+                    "Expected Ready message, got {:?}",
+                    msg
+                ))),
             }
-            _ => Err(GameRLError::ProtocolError(format!(
-                "Expected Ready message, got {:?}",
-                msg
-            ))),
         }
     }
 
