@@ -451,6 +451,14 @@ namespace RimWorld.GameRL
             var previousHash = _commandExecutor?.GetLastStateHash(agentId);
             var config = _commandExecutor?.GetDeltaConfig(agentId) ?? DeltaConfig.Minimal;
 
+            // Check if RequestFullState was called - treat as first observation
+            var forceFullState = _commandExecutor?.ForceFullState ?? false;
+            if (forceFullState)
+            {
+                isFirst = true;
+                _commandExecutor!.ForceFullState = false;  // Reset flag
+            }
+
             var obs = _stateExtractor!.ExtractForAgent(agentId, mode, isFirst, previousHash, config);
 
             // Update state tracking after extraction

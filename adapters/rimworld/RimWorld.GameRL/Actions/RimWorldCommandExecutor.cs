@@ -31,6 +31,11 @@ namespace RimWorld.GameRL.Actions
         /// </summary>
         public ActionResult? LastActionResult { get; private set; }
 
+        /// <summary>
+        /// Force full state on next observation (set by RequestFullState action)
+        /// </summary>
+        public bool ForceFullState { get; set; }
+
         public RimWorldCommandExecutor()
         {
             // Initialize HarmonyRPC with RimWorld logging

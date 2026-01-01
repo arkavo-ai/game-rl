@@ -688,15 +688,15 @@ namespace RimWorld.GameRL.Actions
         [GameRLAction("RequestFullState", Description = "Request full state observation on next sim_step")]
         public static void RequestFullState()
         {
-            var extractor = GameRLMod.StateExtractor;
-            if (extractor != null)
+            var executor = GameRLMod.CommandExecutor;
+            if (executor != null)
             {
-                extractor.ForceFullState = true;
+                executor.ForceFullState = true;
                 Log.Message("[GameRL] RequestFullState: Next observation will be full state");
             }
             else
             {
-                Log.Warning("[GameRL] RequestFullState: State extractor not initialized");
+                Log.Warning("[GameRL] RequestFullState: Command executor not initialized");
             }
         }
     }
