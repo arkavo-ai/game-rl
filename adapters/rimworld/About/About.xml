@@ -16,17 +16,18 @@
   <loadAfter>
     <li>brrainz.harmony</li>
   </loadAfter>
-  <description>
-Enables AI agents to observe and control RimWorld colonies through the Game-RL protocol.
+  <description>Version 0.2.1
+
+Enables AI agents to observe and control RimWorld colonies through the Game-RL protocol. Connect with Claude Code for natural language colony management.
 
 Features:
 - ColonyManager agent for strategic colony control
 - Work priority management
 - Colonist drafting and movement
+- Forbid/Unforbid items and resources
+- Medical care settings
+- Bill management (add, modify, cancel)
 - Resource and threat observations
-- Deterministic seeding for reproducible experiments
-
-For research and training purposes.
 
 https://github.com/arkavo-ai/game-rl
   </description>
