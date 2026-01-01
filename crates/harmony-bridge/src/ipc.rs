@@ -175,30 +175,6 @@ impl HarmonyBridge {
             .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
         writer.write_message(&data).await
     }
-
-    /// Get game manifest from capabilities
-    pub fn manifest(&self) -> GameManifest {
-        let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
-            multi_agent: false,
-            max_agents: 1,
-            deterministic: false,
-            headless: false,
-        });
-
-        GameManifest {
-            name: self.game_name.clone(),
-            version: self.game_version.clone(),
-            game_rl_version: "0.5.0".into(),
-            capabilities: game_rl_core::Capabilities {
-                multi_agent: caps.multi_agent,
-                max_agents: caps.max_agents,
-                deterministic: caps.deterministic,
-                headless: caps.headless,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
 }
 
 #[async_trait]
@@ -365,6 +341,29 @@ impl GameEnvironment for HarmonyBridge {
         let mut guard = self.writer.lock().await;
         *guard = None;
         Ok(())
+    }
+
+    fn manifest(&self) -> GameManifest {
+        let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
+            multi_agent: false,
+            max_agents: 1,
+            deterministic: false,
+            headless: false,
+        });
+
+        GameManifest {
+            name: self.game_name.clone(),
+            version: self.game_version.clone(),
+            game_rl_version: env!("CARGO_PKG_VERSION").into(),
+            capabilities: game_rl_core::Capabilities {
+                multi_agent: caps.multi_agent,
+                max_agents: caps.max_agents,
+                deterministic: caps.deterministic,
+                headless: caps.headless,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 
     fn subscribe_events(&self) -> Option<broadcast::Receiver<StateUpdate>> {

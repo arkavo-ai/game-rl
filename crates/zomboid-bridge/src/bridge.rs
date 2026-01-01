@@ -121,7 +121,7 @@ impl ZomboidBridge {
 
         // Clear command file if exists, write status
         let _ = fs::write(&self.command_file, "").await;
-        let status = r#"{"status":"ready","version":"0.5.0"}"#;
+        let status = format!(r#"{{"status":"ready","version":"{}"}}"#, env!("CARGO_PKG_VERSION"));
         fs::write(&self.status_file, status)
             .await
             .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
@@ -183,7 +183,7 @@ impl ZomboidBridge {
 
         // Write ready signal
         let _ = fs::write(&self.command_file, "").await;
-        let status = r#"{"status":"ready","version":"0.5.0"}"#;
+        let status = format!(r#"{{"status":"ready","version":"{}"}}"#, env!("CARGO_PKG_VERSION"));
         fs::write(&self.status_file, status)
             .await
             .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
@@ -317,30 +317,6 @@ impl ZomboidBridge {
             .map_err(|e| GameRLError::IpcError(format!("Failed to write command: {}", e)))?;
 
         Ok(())
-    }
-
-    /// Get game manifest from capabilities
-    pub fn manifest(&self) -> GameManifest {
-        let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
-            multi_agent: true,
-            max_agents: 4,
-            deterministic: false,
-            headless: false,
-        });
-
-        GameManifest {
-            name: self.game_name.clone(),
-            version: self.game_version.clone(),
-            game_rl_version: "0.5.0".into(),
-            capabilities: game_rl_core::Capabilities {
-                multi_agent: caps.multi_agent,
-                max_agents: caps.max_agents,
-                deterministic: caps.deterministic,
-                headless: caps.headless,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
     }
 }
 
@@ -517,6 +493,29 @@ impl GameEnvironment for ZomboidBridge {
         let _ = fs::remove_file(&self.status_file).await;
 
         Ok(())
+    }
+
+    fn manifest(&self) -> GameManifest {
+        let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
+            multi_agent: true,
+            max_agents: 4,
+            deterministic: false,
+            headless: false,
+        });
+
+        GameManifest {
+            name: self.game_name.clone(),
+            version: self.game_version.clone(),
+            game_rl_version: env!("CARGO_PKG_VERSION").into(),
+            capabilities: game_rl_core::Capabilities {
+                multi_agent: caps.multi_agent,
+                max_agents: caps.max_agents,
+                deterministic: caps.deterministic,
+                headless: caps.headless,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
     }
 
     fn subscribe_events(&self) -> Option<broadcast::Receiver<StateUpdate>> {

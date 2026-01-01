@@ -140,12 +140,15 @@ mod tests {
     fn test_lua_ready_message() -> LuaResult<()> {
         let lua = create_lua_with_json()?;
 
+        // Inject version from Cargo.toml so test stays in sync
+        lua.globals().set("GAME_RL_VERSION", env!("CARGO_PKG_VERSION"))?;
+
         let json: String = lua.load(r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "Ready",
                 Name = "Project Zomboid",
-                Version = "0.5.0",
+                Version = GAME_RL_VERSION,
                 Capabilities = {
                     MultiAgent = true,
                     MaxAgents = 4,
@@ -163,7 +166,7 @@ mod tests {
         match msg {
             GameMessage::Ready { name, version, capabilities } => {
                 assert_eq!(name, "Project Zomboid");
-                assert_eq!(version, "0.5.0");
+                assert_eq!(version, env!("CARGO_PKG_VERSION"));
                 assert!(capabilities.multi_agent);
                 assert_eq!(capabilities.max_agents, 4);
             }

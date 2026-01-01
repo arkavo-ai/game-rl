@@ -5,7 +5,7 @@
 //! - Project Zomboid via file IPC (~/Zomboid/Lua/gamerl_status.json)
 
 use anyhow::Result;
-use game_rl_server::GameRLServer;
+use game_rl_server::{GameEnvironment, GameRLServer};
 use harmony_bridge::HarmonyBridge;
 use std::path::Path;
 use std::time::Duration;
@@ -20,6 +20,15 @@ enum DetectedGame {
 }
 
 const RIMWORLD_SOCKET: &str = "/tmp/arkavo_game_mcp.sock";
+
+/// Run the MCP server with a game bridge
+async fn run_with_bridge<E: GameEnvironment>(bridge: E) -> Result<()> {
+    let manifest = bridge.manifest();
+    info!("Connected to {} v{}", manifest.name, manifest.version);
+    let server = GameRLServer::new(bridge, manifest);
+    server.run_stdio().await?;
+    Ok(())
+}
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -67,18 +76,8 @@ async fn main() -> Result<()> {
 
     // Run server with detected bridge
     match game {
-        DetectedGame::RimWorld(bridge) => {
-            let manifest = bridge.manifest();
-            info!("Connected to {} v{}", manifest.name, manifest.version);
-            let server = GameRLServer::new(bridge, manifest);
-            server.run_stdio().await?;
-        }
-        DetectedGame::Zomboid(bridge) => {
-            let manifest = bridge.manifest();
-            info!("Connected to {} v{}", manifest.name, manifest.version);
-            let server = GameRLServer::new(bridge, manifest);
-            server.run_stdio().await?;
-        }
+        DetectedGame::RimWorld(bridge) => run_with_bridge(bridge).await?,
+        DetectedGame::Zomboid(bridge) => run_with_bridge(bridge).await?,
     }
 
     Ok(())
