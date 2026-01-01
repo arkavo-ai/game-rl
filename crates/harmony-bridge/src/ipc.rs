@@ -1,18 +1,17 @@
 //! IPC communication with .NET games
 
 use async_trait::async_trait;
-use game_bridge::{
-    GameCapabilities, GameMessage, StepResultPayload, serialize,
-    AsyncWriter, reader_task,
-};
 #[cfg(unix)]
 use game_bridge::unix::{UnixReadWrapper, UnixWriteWrapper};
+use game_bridge::{
+    AsyncWriter, GameCapabilities, GameMessage, StepResultPayload, reader_task, serialize,
+};
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
 };
-use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
+use game_rl_server::environment::StateUpdate;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
@@ -37,7 +36,6 @@ pub struct HarmonyBridge {
     /// Background reader task handle
     _reader_handle: Option<tokio::task::JoinHandle<()>>,
 }
-
 
 impl HarmonyBridge {
     /// Create a new bridge (not connected yet)
@@ -370,4 +368,3 @@ impl GameEnvironment for HarmonyBridge {
         Some(self.event_tx.subscribe())
     }
 }
-

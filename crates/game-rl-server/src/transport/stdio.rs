@@ -109,11 +109,9 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>) -> Result<()> {
 
         {
             let mut out = stdout.lock().await;
-            out.write_all(response_json.as_bytes())
-                .await
-                .map_err(|e| {
-                    game_rl_core::GameRLError::IpcError(format!("Failed to write stdout: {}", e))
-                })?;
+            out.write_all(response_json.as_bytes()).await.map_err(|e| {
+                game_rl_core::GameRLError::IpcError(format!("Failed to write stdout: {}", e))
+            })?;
             out.write_all(b"\n").await.map_err(|e| {
                 game_rl_core::GameRLError::IpcError(format!("Failed to write newline: {}", e))
             })?;

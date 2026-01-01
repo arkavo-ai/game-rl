@@ -13,7 +13,8 @@ mod tests {
         let lua = Lua::new();
 
         // Load the actual JSON.lua from the zomboid adapter
-        let json_lua = include_str!("../../../adapters/zomboid/mod/media/lua/shared/GameRL/JSON.lua");
+        let json_lua =
+            include_str!("../../../adapters/zomboid/mod/media/lua/shared/GameRL/JSON.lua");
 
         // Execute JSON.lua and capture its return value
         let json_module: mlua::Value = lua.load(json_lua).eval()?;
@@ -33,7 +34,9 @@ mod tests {
         let lua = create_lua_with_json()?;
 
         // Simulate what GameRL.lua does for StepResult
-        let json: String = lua.load(r#"
+        let json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "StepResult",
@@ -45,13 +48,15 @@ mod tests {
                 Truncated = false,
                 StateHash = "abc123"
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         println!("Lua produced: {}", json);
 
         // Verify Rust can deserialize it
-        let msg: GameMessage = serde_json::from_str(&json)
-            .expect("Rust should deserialize Lua's StepResult");
+        let msg: GameMessage =
+            serde_json::from_str(&json).expect("Rust should deserialize Lua's StepResult");
 
         match msg {
             GameMessage::StepResult { result } => {
@@ -70,7 +75,9 @@ mod tests {
         let lua = create_lua_with_json()?;
 
         // Empty table {} should serialize as {} not []
-        let json: String = lua.load(r#"
+        let json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "StepResult",
@@ -81,13 +88,18 @@ mod tests {
                 Done = false,
                 Truncated = false
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         println!("Lua produced: {}", json);
 
         // This should NOT contain "[]" for RewardComponents
-        assert!(!json.contains("\"RewardComponents\":[]"),
-            "Empty table should be {{}} not []: {}", json);
+        assert!(
+            !json.contains("\"RewardComponents\":[]"),
+            "Empty table should be {{}} not []: {}",
+            json
+        );
 
         // Verify Rust can deserialize
         let msg: GameMessage = serde_json::from_str(&json)
@@ -107,7 +119,9 @@ mod tests {
     fn test_lua_reward_components_with_values() -> LuaResult<()> {
         let lua = create_lua_with_json()?;
 
-        let json: String = lua.load(r#"
+        let json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "StepResult",
@@ -118,7 +132,9 @@ mod tests {
                 Done = false,
                 Truncated = false
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         println!("Lua produced: {}", json);
 
@@ -141,9 +157,12 @@ mod tests {
         let lua = create_lua_with_json()?;
 
         // Inject version from Cargo.toml so test stays in sync
-        lua.globals().set("GAME_RL_VERSION", env!("CARGO_PKG_VERSION"))?;
+        lua.globals()
+            .set("GAME_RL_VERSION", env!("CARGO_PKG_VERSION"))?;
 
-        let json: String = lua.load(r#"
+        let json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "Ready",
@@ -156,15 +175,21 @@ mod tests {
                     Headless = false
                 }
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         println!("Lua produced: {}", json);
 
-        let msg: GameMessage = serde_json::from_str(&json)
-            .expect("Rust should deserialize Lua's Ready message");
+        let msg: GameMessage =
+            serde_json::from_str(&json).expect("Rust should deserialize Lua's Ready message");
 
         match msg {
-            GameMessage::Ready { name, version, capabilities } => {
+            GameMessage::Ready {
+                name,
+                version,
+                capabilities,
+            } => {
                 assert_eq!(name, "Project Zomboid");
                 assert_eq!(version, env!("CARGO_PKG_VERSION"));
                 assert!(capabilities.multi_agent);
@@ -180,13 +205,17 @@ mod tests {
     fn test_lua_state_hash() -> LuaResult<()> {
         let lua = create_lua_with_json()?;
 
-        let json: String = lua.load(r#"
+        let json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "StateHash",
                 Hash = "00b866e0"
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         println!("Lua produced: {}", json);
 
@@ -206,7 +235,9 @@ mod tests {
     fn test_lua_agent_registered() -> LuaResult<()> {
         let lua = create_lua_with_json()?;
 
-        let json: String = lua.load(r#"
+        let json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "AgentRegistered",
@@ -220,7 +251,9 @@ mod tests {
                     }
                 }
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         println!("Lua produced: {}", json);
 
@@ -255,10 +288,14 @@ mod tests {
         // Verify Lua can decode it
         lua.globals().set("rust_json", json.clone())?;
 
-        let result: mlua::Table = lua.load(r#"
+        let result: mlua::Table = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.decode(rust_json)
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         assert_eq!(result.get::<String>("Type")?, "ExecuteAction");
         assert_eq!(result.get::<String>("AgentId")?, "agent1");
@@ -282,10 +319,14 @@ mod tests {
 
         lua.globals().set("rust_json", json)?;
 
-        let result: mlua::Table = lua.load(r#"
+        let result: mlua::Table = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.decode(rust_json)
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         assert_eq!(result.get::<String>("Type")?, "RegisterAgent");
         assert_eq!(result.get::<String>("AgentId")?, "test");
@@ -305,10 +346,14 @@ mod tests {
 
         lua.globals().set("rust_json", json)?;
 
-        let result: mlua::Table = lua.load(r#"
+        let result: mlua::Table = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.decode(rust_json)
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         assert_eq!(result.get::<String>("Type")?, "GetStateHash");
 
@@ -329,10 +374,14 @@ mod tests {
 
         lua.globals().set("rust_json", json)?;
 
-        let result: mlua::Table = lua.load(r#"
+        let result: mlua::Table = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.decode(rust_json)
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         assert_eq!(result.get::<String>("Type")?, "Reset");
         assert_eq!(result.get::<i64>("Seed")?, 42);
@@ -348,7 +397,9 @@ mod tests {
         let lua = create_lua_with_json()?;
 
         // Lua creates a StepResult
-        let lua_json: String = lua.load(r#"
+        let lua_json: String = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.encode({
                 Type = "StepResult",
@@ -360,7 +411,9 @@ mod tests {
                 Truncated = false,
                 StateHash = "roundtrip-hash"
             })
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         // Rust deserializes
         let msg: GameMessage = serde_json::from_str(&lua_json).unwrap();
@@ -371,10 +424,14 @@ mod tests {
         // Lua deserializes Rust's output
         lua.globals().set("rust_json", rust_json)?;
 
-        let result: mlua::Table = lua.load(r#"
+        let result: mlua::Table = lua
+            .load(
+                r#"
             local JSON = require("JSON") or _G.JSON
             return JSON.decode(rust_json)
-        "#).eval()?;
+        "#,
+            )
+            .eval()?;
 
         // Verify values survived the round-trip
         assert_eq!(result.get::<String>("Type")?, "StepResult");

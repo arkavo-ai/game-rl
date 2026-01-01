@@ -5,7 +5,9 @@
 //!
 //! Uses PascalCase throughout for LLM-friendly natural language readability.
 
-use game_rl_core::{Action, AgentConfig, AgentId, AgentType, GameEvent, Observation, StreamDescriptor};
+use game_rl_core::{
+    Action, AgentConfig, AgentId, AgentType, GameEvent, Observation, StreamDescriptor,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -208,7 +210,11 @@ mod tests {
         let result: Result<GameMessage, _> = serde_json::from_str(json);
         match result {
             Ok(msg) => match msg {
-                GameMessage::Ready { name, version, capabilities } => {
+                GameMessage::Ready {
+                    name,
+                    version,
+                    capabilities,
+                } => {
                     assert_eq!(name, "ProjectZomboid");
                     assert_eq!(version, "41.78");
                     assert!(capabilities.multi_agent);

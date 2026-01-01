@@ -8,8 +8,8 @@ use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
 };
-use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
+use game_rl_server::environment::StateUpdate;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
@@ -121,7 +121,10 @@ impl ZomboidBridge {
 
         // Clear command file if exists, write status
         let _ = fs::write(&self.command_file, "").await;
-        let status = format!(r#"{{"status":"ready","version":"{}"}}"#, env!("CARGO_PKG_VERSION"));
+        let status = format!(
+            r#"{{"status":"ready","version":"{}"}}"#,
+            env!("CARGO_PKG_VERSION")
+        );
         fs::write(&self.status_file, status)
             .await
             .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
@@ -183,7 +186,10 @@ impl ZomboidBridge {
 
         // Write ready signal
         let _ = fs::write(&self.command_file, "").await;
-        let status = format!(r#"{{"status":"ready","version":"{}"}}"#, env!("CARGO_PKG_VERSION"));
+        let status = format!(
+            r#"{{"status":"ready","version":"{}"}}"#,
+            env!("CARGO_PKG_VERSION")
+        );
         fs::write(&self.status_file, status)
             .await
             .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
@@ -240,9 +246,9 @@ impl ZomboidBridge {
                     warn!("Game appears to have restarted, attempting reconnect...");
                     self.reconnect().await?;
                     // Retry the request once after reconnect
-                    fs::write(&self.command_file, &json)
-                        .await
-                        .map_err(|e| GameRLError::IpcError(format!("Failed to write command: {}", e)))?;
+                    fs::write(&self.command_file, &json).await.map_err(|e| {
+                        GameRLError::IpcError(format!("Failed to write command: {}", e))
+                    })?;
                     self.wait_for_response().await
                 } else {
                     Err(e)

@@ -10,7 +10,7 @@ use harmony_bridge::HarmonyBridge;
 use std::path::Path;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{info, warn, Level};
+use tracing::{Level, info, warn};
 use tracing_subscriber::FmtSubscriber;
 use zomboid_bridge::{ZomboidBridge, ZomboidConfig};
 

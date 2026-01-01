@@ -7,8 +7,8 @@
 //! - Background reader task for handling messages
 
 pub mod protocol;
-pub mod transport;
 pub mod tcp;
+pub mod transport;
 #[cfg(unix)]
 pub mod unix;
 

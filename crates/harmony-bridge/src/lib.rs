@@ -12,5 +12,5 @@ pub mod protocol {
     pub use game_bridge::protocol::*;
 }
 
-pub use ipc::HarmonyBridge;
 pub use game_bridge::GameMessage;
+pub use ipc::HarmonyBridge;
