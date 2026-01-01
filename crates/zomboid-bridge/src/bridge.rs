@@ -1,10 +1,9 @@
-//! Bridge to Project Zomboid via TCP
+//! Bridge to Project Zomboid via file-based IPC
+//!
+//! Uses file system for communication since PZ's Lua is sandboxed
+//! and doesn't have socket access.
 
-use game_bridge::{
-    AsyncWriter, GameCapabilities, GameMessage, StepResultPayload,
-    reader_task, serialize,
-    tcp::{TcpReadWrapper, TcpWriteWrapper},
-};
+use game_bridge::{GameCapabilities, GameMessage, StepResultPayload};
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
@@ -12,44 +11,51 @@ use game_rl_core::{
 use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::Duration;
-use tokio::net::TcpStream;
-use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tokio::fs;
+use tokio::sync::broadcast;
+use tokio::time::sleep;
 use tracing::{debug, info, warn};
 
-/// Configuration for Zomboid bridge connection
+/// Configuration for Zomboid bridge
 #[derive(Debug, Clone)]
 pub struct ZomboidConfig {
-    /// Host to connect to (default: 127.0.0.1)
-    pub host: String,
-    /// Port for main IPC channel (default: 19731)
-    pub port: u16,
-    /// Port for vision stream channel (default: 19732)
-    pub vision_port: u16,
-    /// Connection timeout
-    pub connect_timeout: Duration,
+    /// Base path for IPC files (default: ~/Zomboid/gamerl/)
+    pub ipc_path: PathBuf,
+    /// Timeout waiting for game response
+    pub response_timeout: Duration,
+    /// Poll interval for file changes
+    pub poll_interval: Duration,
 }
 
 impl Default for ZomboidConfig {
     fn default() -> Self {
+        let home = std::env::var("HOME")
+            .or_else(|_| std::env::var("USERPROFILE"))
+            .unwrap_or_else(|_| "/tmp".to_string());
+
         Self {
-            host: "127.0.0.1".into(),
-            port: 19731,
-            vision_port: 19732,
-            connect_timeout: Duration::from_secs(30),
+            // PZ Lua uses ~/Zomboid/Lua/ for file I/O
+            ipc_path: PathBuf::from(home).join("Zomboid").join("Lua"),
+            response_timeout: Duration::from_secs(30),
+            poll_interval: Duration::from_millis(50),
         }
     }
 }
 
-/// Bridge to Project Zomboid via TCP
+/// Bridge to Project Zomboid via file-based IPC
 pub struct ZomboidBridge {
     /// Connection configuration
     config: ZomboidConfig,
-    /// Writer half of the connection
-    writer: Arc<Mutex<Option<Box<dyn AsyncWriter>>>>,
-    /// Channel to send requests to the reader task
-    request_tx: mpsc::Sender<(GameMessage, oneshot::Sender<Result<GameMessage>>)>,
+    /// Path to command file (Rust writes, Lua reads)
+    command_file: PathBuf,
+    /// Path to response file (Lua writes, Rust reads)
+    response_file: PathBuf,
+    /// Path to status file
+    status_file: PathBuf,
+    /// Whether connected
+    connected: bool,
     /// Broadcast channel for pushed state updates
     event_tx: broadcast::Sender<StateUpdate>,
     /// Game capabilities received during Ready
@@ -58,8 +64,6 @@ pub struct ZomboidBridge {
     game_name: String,
     /// Game version
     game_version: String,
-    /// Background reader task handle
-    _reader_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl ZomboidBridge {
@@ -70,140 +74,177 @@ impl ZomboidBridge {
 
     /// Create a new bridge with custom configuration
     pub fn with_config(config: ZomboidConfig) -> Self {
-        let (request_tx, _request_rx) = mpsc::channel(16);
+        // Use flat files with gamerl_ prefix (PZ Lua can't read subdirectories)
+        let command_file = config.ipc_path.join("gamerl_command.json");
+        let response_file = config.ipc_path.join("gamerl_response.json");
+        let status_file = config.ipc_path.join("gamerl_status.json");
         let (event_tx, _) = broadcast::channel(64);
 
         Self {
             config,
-            writer: Arc::new(Mutex::new(None)),
-            request_tx,
+            command_file,
+            response_file,
+            status_file,
+            connected: false,
             event_tx,
             capabilities: None,
-            game_name: "Unknown".into(),
+            game_name: "Project Zomboid".into(),
             game_version: "0.0.0".into(),
-            _reader_handle: None,
         }
     }
 
-    /// Connect to the Project Zomboid game process via TCP
-    pub async fn connect(&mut self) -> Result<()> {
-        let addr = format!("{}:{}", self.config.host, self.config.port);
-        info!("Connecting to Project Zomboid at {}", addr);
+    /// Initialize IPC directory and wait for game to connect
+    pub async fn init(&mut self) -> Result<()> {
+        // Create IPC directory
+        fs::create_dir_all(&self.config.ipc_path)
+            .await
+            .map_err(|e| GameRLError::IpcError(format!("Failed to create IPC directory: {}", e)))?;
 
-        // Connect with timeout
-        let stream = tokio::time::timeout(
-            self.config.connect_timeout,
-            TcpStream::connect(&addr),
-        )
-        .await
-        .map_err(|_| GameRLError::IpcError(format!("Connection timeout to {}", addr)))?
-        .map_err(|e| GameRLError::IpcError(format!("Failed to connect to {}: {}", addr, e)))?;
+        info!("IPC directory: {:?}", self.config.ipc_path);
 
-        // Disable Nagle's algorithm for low latency
-        stream
-            .set_nodelay(true)
-            .map_err(|e| GameRLError::IpcError(format!("Failed to set TCP_NODELAY: {}", e)))?;
+        // Wait for Lua to create the status file first (PZ sandbox requirement)
+        info!("Waiting for PZ Lua to create IPC files...");
+        info!("Start the game with GameRL mod enabled, then load/start a game");
 
-        // Split into read/write halves
-        let (read_half, write_half) = stream.into_split();
-
-        // Store writer
-        {
-            let mut guard = self.writer.lock().await;
-            *guard = Some(Box::new(TcpWriteWrapper(write_half)));
+        let mut last_log = std::time::Instant::now();
+        loop {
+            if self.status_file.exists() {
+                info!("Status file found, writing ready signal...");
+                break;
+            }
+            if last_log.elapsed() > std::time::Duration::from_secs(10) {
+                info!("Still waiting for PZ to create {:?}...", self.status_file);
+                last_log = std::time::Instant::now();
+            }
+            sleep(self.config.poll_interval).await;
         }
 
-        // Create new channels for this connection
-        let (request_tx, request_rx) = mpsc::channel(16);
-        self.request_tx = request_tx;
-
-        // Spawn background reader task
-        let event_tx = self.event_tx.clone();
-        let handle = tokio::spawn(reader_task(
-            TcpReadWrapper(read_half),
-            request_rx,
-            event_tx,
-        ));
-        self._reader_handle = Some(handle);
-
-        // Wait for Ready message
-        let (response_tx, response_rx) = oneshot::channel();
-        self.request_tx
-            .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
+        // Clear command file if exists, write status
+        let _ = fs::write(&self.command_file, "").await;
+        let status = r#"{"status":"ready","version":"0.5.0"}"#;
+        fs::write(&self.status_file, status)
             .await
-            .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
+            .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
 
-        let msg = response_rx
-            .await
-            .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
+        info!("Waiting for Ready message from game...");
 
-        match msg {
+        // Wait for Ready message from game (no timeout - game may take a while to start)
+        let ready_msg = self.wait_for_initial_response().await?;
+
+        match ready_msg {
             GameMessage::Ready {
                 name,
                 version,
                 capabilities,
             } => {
-                info!("Connected to {} v{}", name, version);
+                info!("Game connected: {} v{}", name, version);
                 self.game_name = name;
                 self.game_version = version;
                 self.capabilities = Some(capabilities);
+                self.connected = true;
                 Ok(())
             }
             _ => Err(GameRLError::ProtocolError(format!(
                 "Expected Ready message, got {:?}",
-                msg
+                ready_msg
             ))),
         }
     }
 
-    /// Send a message and wait for response
+    /// Send a command and wait for response
     async fn request(&mut self, msg: GameMessage) -> Result<GameMessage> {
-        let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
-
-        // Log outgoing message
-        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        debug!("[Rust→PZ] len={} json={}", data.len(), json_preview);
-
-        // Send through writer
-        {
-            let mut guard = self.writer.lock().await;
-            let writer = guard
-                .as_mut()
-                .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
-            writer.write_message(&data).await?;
+        if !self.connected {
+            return Err(GameRLError::IpcError("Not connected".into()));
         }
 
-        // Wait for response via channel
-        let (response_tx, response_rx) = oneshot::channel();
-        self.request_tx
-            .send((msg, response_tx))
-            .await
-            .map_err(|_| GameRLError::IpcError("Reader task not running".into()))?;
+        // Serialize message
+        let json = serde_json::to_string(&msg)
+            .map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
-        response_rx
+        debug!("[Rust→PZ] {}", &json[..json.len().min(200)]);
+
+        // Write command file
+        fs::write(&self.command_file, &json)
             .await
-            .map_err(|_| GameRLError::IpcError("Reader task died waiting for response".into()))?
+            .map_err(|e| GameRLError::IpcError(format!("Failed to write command: {}", e)))?;
+
+        // Wait for response
+        self.wait_for_response().await
     }
 
-    /// Send a message without waiting for response (fire-and-forget)
+    /// Wait for a response in the response file
+    /// If `initial_wait` is true, waits indefinitely (for game startup)
+    async fn wait_for_response_impl(&self, initial_wait: bool) -> Result<GameMessage> {
+        let start = std::time::Instant::now();
+        let mut last_log = std::time::Instant::now();
+
+        loop {
+            // For normal requests, use timeout; for initial connection, wait forever
+            if !initial_wait && start.elapsed() > self.config.response_timeout {
+                return Err(GameRLError::IpcError("Response timeout".into()));
+            }
+
+            // Periodic status logging during initial wait
+            if initial_wait && last_log.elapsed() > Duration::from_secs(10) {
+                info!("Still waiting for Project Zomboid... (start/load a game, press F11)");
+                last_log = std::time::Instant::now();
+            }
+
+            // Try to read response file
+            match fs::read_to_string(&self.response_file).await {
+                Ok(content) if !content.is_empty() => {
+                    // Clear response file
+                    let _ = fs::write(&self.response_file, "").await;
+
+                    debug!("[PZ→Rust] {}", &content[..content.len().min(200)]);
+
+                    // Parse JSON
+                    let msg: GameMessage = serde_json::from_str(&content)
+                        .map_err(|e| GameRLError::SerializationError(e.to_string()))?;
+
+                    return Ok(msg);
+                }
+                _ => {
+                    // Wait and retry
+                    sleep(self.config.poll_interval).await;
+                }
+            }
+        }
+    }
+
+    /// Wait for a response (with timeout for normal operations)
+    async fn wait_for_response(&self) -> Result<GameMessage> {
+        self.wait_for_response_impl(false).await
+    }
+
+    /// Wait for initial connection (no timeout, for game startup)
+    async fn wait_for_initial_response(&self) -> Result<GameMessage> {
+        self.wait_for_response_impl(true).await
+    }
+
+    /// Send a message without waiting for response
     async fn send(&mut self, msg: GameMessage) -> Result<()> {
-        let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
+        if !self.connected {
+            return Err(GameRLError::IpcError("Not connected".into()));
+        }
 
-        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        debug!("[Rust→PZ] len={} json={}", data.len(), json_preview);
+        let json = serde_json::to_string(&msg)
+            .map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
-        let mut guard = self.writer.lock().await;
-        let writer = guard
-            .as_mut()
-            .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
-        writer.write_message(&data).await
+        debug!("[Rust→PZ] {}", &json[..json.len().min(200)]);
+
+        fs::write(&self.command_file, &json)
+            .await
+            .map_err(|e| GameRLError::IpcError(format!("Failed to write command: {}", e)))?;
+
+        Ok(())
     }
 
     /// Get game manifest from capabilities
     pub fn manifest(&self) -> GameManifest {
         let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
             multi_agent: true,
-            max_agents: 8,
+            max_agents: 4,
             deterministic: false,
             headless: false,
         });
@@ -391,8 +432,11 @@ impl GameEnvironment for ZomboidBridge {
 
     async fn shutdown(&mut self) -> Result<()> {
         self.send(GameMessage::Shutdown).await?;
-        let mut guard = self.writer.lock().await;
-        *guard = None;
+        self.connected = false;
+
+        // Clean up status file
+        let _ = fs::remove_file(&self.status_file).await;
+
         Ok(())
     }
 

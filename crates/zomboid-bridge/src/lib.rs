@@ -1,8 +1,8 @@
-//! Bridge between Rust MCP server and Project Zomboid via Java/Lua mod
+//! Bridge between Rust MCP server and Project Zomboid via file-based IPC
 //!
 //! This crate provides:
-//! - TCP communication with Project Zomboid Java mod
-//! - Wire protocol for game state and action exchange (via game-bridge)
+//! - File-based IPC with Project Zomboid Lua mod (PZ's Lua is sandboxed)
+//! - Wire protocol for game state and action exchange (JSON via files)
 //! - GameEnvironment implementation that proxies to the PZ game
 
 pub mod bridge;
@@ -12,5 +12,5 @@ pub mod protocol {
     pub use game_bridge::protocol::*;
 }
 
-pub use bridge::ZomboidBridge;
+pub use bridge::{ZomboidBridge, ZomboidConfig};
 pub use game_bridge::GameMessage;

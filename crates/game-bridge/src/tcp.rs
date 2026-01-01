@@ -73,7 +73,6 @@ impl AsyncWriter for TcpWriteWrapper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::net::TcpStream;
 
     #[tokio::test]
     async fn test_tcp_message_format() {
