@@ -8,7 +8,7 @@ pub type AgentId = String;
 
 /// Standard agent archetypes
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "PascalCase")]
 pub enum AgentType {
     /// Controls a single game entity (NPC, unit, pawn)
     EntityBehavior,
@@ -28,6 +28,7 @@ pub enum AgentType {
 
 /// Configuration for agent registration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct AgentConfig {
     /// Entity ID for EntityBehavior agents
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,6 +57,7 @@ fn default_observation_profile() -> String {
 
 /// Reward shaping configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct RewardShaping {
     /// Which reward components to include
     pub components: Vec<String>,
@@ -66,6 +68,7 @@ pub struct RewardShaping {
 
 /// Agent manifest returned after registration
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct AgentManifest {
     pub agent_id: AgentId,
     pub agent_type: AgentType,
@@ -88,7 +91,7 @@ impl Default for AgentConfig {
 
 /// Agent status in the registry
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "PascalCase")]
 pub enum AgentStatus {
     Registered,
     Active,
@@ -98,6 +101,7 @@ pub enum AgentStatus {
 
 /// Agent registry entry
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct AgentEntry {
     pub agent_id: AgentId,
     pub agent_type: AgentType,

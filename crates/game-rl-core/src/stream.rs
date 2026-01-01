@@ -27,6 +27,7 @@ impl PixelFormat {
 
 /// Vision stream descriptor
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct StreamDescriptor {
     /// Stream identifier
     pub stream_id: String,
@@ -47,30 +48,51 @@ pub struct StreamDescriptor {
 
 /// Transport mechanism for vision data
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum StreamTransport {
     /// macOS IOSurface
-    IOSurface { surface_ids: Vec<u64> },
+    IOSurface {
+        #[serde(rename = "SurfaceIds")]
+        surface_ids: Vec<u64>,
+    },
     /// POSIX shared memory
-    Shm { shm_name: String, offsets: Vec<u64> },
+    Shm {
+        #[serde(rename = "ShmName")]
+        shm_name: String,
+        #[serde(rename = "Offsets")]
+        offsets: Vec<u64>,
+    },
     /// Windows DXGI shared texture
-    Dxgi { shared_handles: Vec<u64> },
+    Dxgi {
+        #[serde(rename = "SharedHandles")]
+        shared_handles: Vec<u64>,
+    },
     /// Inline base64 (fallback, slow)
     Inline,
 }
 
 /// Synchronization mechanism
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum StreamSync {
-    MetalEvent { handle: u64 },
-    D3dFence { handle: u64 },
-    Semaphore { name: String },
+    MetalEvent {
+        #[serde(rename = "Handle")]
+        handle: u64,
+    },
+    D3dFence {
+        #[serde(rename = "Handle")]
+        handle: u64,
+    },
+    Semaphore {
+        #[serde(rename = "Name")]
+        name: String,
+    },
     Polling,
 }
 
 /// Named stream profile
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct StreamProfile {
     /// Profile name
     pub name: String,
@@ -80,11 +102,12 @@ pub struct StreamProfile {
 
 /// Configuration for a single stream
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct StreamConfig {
     /// Stream name
     pub name: String,
     /// Stream type
-    #[serde(rename = "type")]
+    #[serde(rename = "Type")]
     pub stream_type: StreamType,
     /// Width in pixels
     pub width: u32,

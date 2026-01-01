@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetaData>
-  <name>Game-RL: AI Training Interface</name>
+  <name>Arkavo Game-RL</name>
   <author>Arkavo</author>
   <packageId>arkavo.gamerl.rimworld</packageId>
   <supportedVersions>

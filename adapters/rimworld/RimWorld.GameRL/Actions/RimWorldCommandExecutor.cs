@@ -25,6 +25,11 @@ namespace RimWorld.GameRL.Actions
         private int _episodeStartTick;
         private const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
 
+        /// <summary>
+        /// Last action result for RL feedback
+        /// </summary>
+        public ActionResult? LastActionResult { get; private set; }
+
         public RimWorldCommandExecutor()
         {
             // Initialize HarmonyRPC with RimWorld logging
@@ -45,7 +50,10 @@ namespace RimWorld.GameRL.Actions
         public bool RegisterAgent(string agentId, string agentType, Dictionary<string, object> config)
         {
             if (_agents.ContainsKey(agentId))
-                return false;
+            {
+                Log.Message($"[GameRL] Agent already registered: {agentId} ({agentType})");
+                return true;
+            }
 
             _agents[agentId] = new AgentInfo
             {
@@ -67,7 +75,7 @@ namespace RimWorld.GameRL.Actions
         {
             if (action == null)
             {
-                Log.Warning("[GameRL] Null action received");
+                LastActionResult = ActionResult.NoOp();
                 return;
             }
 
@@ -75,24 +83,38 @@ namespace RimWorld.GameRL.Actions
             var actionDict = action as Dictionary<string, object>;
             if (actionDict == null)
             {
+                LastActionResult = ActionResult.Fail("Unknown", ActionErrorCode.InternalError,
+                    $"Unknown action format: {action.GetType()}");
                 Log.Warning($"[GameRL] Unknown action format: {action.GetType()}");
                 return;
             }
 
-            // Extract action type and parameters
-            var actionType = actionDict.TryGetValue("type", out var t) ? t?.ToString() : null;
-            var actionParams = actionDict.TryGetValue("params", out var p)
-                ? p as Dictionary<string, object>
-                : actionDict;
+            // Extract action type and parameters (Type is PascalCase from Rust)
+            var actionType = actionDict.TryGetValue("Type", out var t) ? t?.ToString() : null;
+            // Params are flattened into the action dict (not nested)
+            var actionParams = actionDict;
 
             if (string.IsNullOrEmpty(actionType))
             {
                 // No action type = no-op (wait)
+                LastActionResult = ActionResult.NoOp();
+                return;
+            }
+
+            // Check if action exists
+            if (!_rpc.HasAction(actionType!))
+            {
+                LastActionResult = ActionResult.Fail(actionType!, ActionErrorCode.UnknownAction,
+                    $"Unknown action: {actionType}");
+                Log.Warning($"[GameRL] Unknown action: {actionType}");
                 return;
             }
 
             // Dispatch via HarmonyRPC - automatic method resolution and parameter binding
-            _rpc.Dispatch(actionType!, actionParams);
+            var success = _rpc.Dispatch(actionType!, actionParams);
+            LastActionResult = success
+                ? ActionResult.Ok(actionType!, "Action executed")
+                : ActionResult.Fail(actionType!, ActionErrorCode.InternalError, "Action dispatch failed");
         }
 
         public void Reset(ulong? seed, string? scenario)

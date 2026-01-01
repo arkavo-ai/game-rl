@@ -34,6 +34,7 @@ namespace GameRL.Harmony
         public event Action<RegisterAgentMessage>? OnRegisterAgent;
         public event Action<DeregisterAgentMessage>? OnDeregisterAgent;
         public event Action<ExecuteActionMessage>? OnExecuteAction;
+        public event Action<ConfigureStreamsMessage>? OnConfigureStreams;
         public event Action<ResetMessage>? OnReset;
         public event Action<GetStateHashMessage>? OnGetStateHash;
         public event Action? OnShutdown;
@@ -204,7 +205,7 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
-        /// Deserialize incoming JSON message based on "type" field
+        /// Deserialize incoming JSON message based on "Type" field (PascalCase)
         /// </summary>
         private GameMessage? DeserializeMessage(byte[] data)
         {
@@ -212,27 +213,24 @@ namespace GameRL.Harmony
             {
                 var json = Encoding.UTF8.GetString(data);
 
-                // Diagnostic logging
-                var preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
-                Log($"[C#←Rust] len={data.Length} json={preview}");
-
                 var obj = JObject.Parse(json);
-                var type = obj["type"]?.ToString();
+                var type = obj["Type"]?.ToString();
 
                 if (string.IsNullOrEmpty(type))
                 {
-                    LogError("Message missing 'type' field");
+                    LogError("Message missing 'Type' field");
                     return null;
                 }
 
                 return type switch
                 {
-                    "register_agent" => ParseRegisterAgent(obj),
-                    "deregister_agent" => ParseDeregisterAgent(obj),
-                    "execute_action" => ParseExecuteAction(obj),
-                    "reset" => ParseReset(obj),
-                    "get_state_hash" => new GetStateHashMessage(),
-                    "shutdown" => new ShutdownMessage(),
+                    "RegisterAgent" => ParseRegisterAgent(obj),
+                    "DeregisterAgent" => ParseDeregisterAgent(obj),
+                    "ExecuteAction" => ParseExecuteAction(obj),
+                    "ConfigureStreams" => ParseConfigureStreams(obj),
+                    "Reset" => ParseReset(obj),
+                    "GetStateHash" => new GetStateHashMessage(),
+                    "Shutdown" => new ShutdownMessage(),
                     _ => null
                 };
             }
@@ -247,17 +245,17 @@ namespace GameRL.Harmony
         {
             var msg = new RegisterAgentMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? "",
-                AgentType = obj["agent_type"]?.ToString() ?? ""
+                AgentId = obj["AgentId"]?.ToString() ?? "",
+                AgentType = obj["AgentType"]?.ToString() ?? ""
             };
 
-            var config = obj["config"] as JObject;
+            var config = obj["Config"] as JObject;
             if (config != null)
             {
                 msg.Config = new AgentConfig
                 {
-                    EntityId = config["entity_id"]?.ToString(),
-                    ObservationProfile = config["observation_profile"]?.ToString() ?? "default"
+                    EntityId = config["EntityId"]?.ToString(),
+                    ObservationProfile = config["ObservationProfile"]?.ToString() ?? "default"
                 };
             }
 
@@ -268,7 +266,7 @@ namespace GameRL.Harmony
         {
             return new DeregisterAgentMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? ""
+                AgentId = obj["AgentId"]?.ToString() ?? ""
             };
         }
 
@@ -276,7 +274,7 @@ namespace GameRL.Harmony
         {
             // Convert JToken action to Dictionary for HarmonyRPC dispatch
             object? action = null;
-            var actionToken = obj["action"];
+            var actionToken = obj["Action"];
             if (actionToken != null && actionToken.Type != JTokenType.Null)
             {
                 action = actionToken.ToObject<Dictionary<string, object>>();
@@ -284,9 +282,9 @@ namespace GameRL.Harmony
 
             return new ExecuteActionMessage
             {
-                AgentId = obj["agent_id"]?.ToString() ?? "",
+                AgentId = obj["AgentId"]?.ToString() ?? "",
                 Action = action,
-                Ticks = obj["ticks"]?.ToObject<uint>() ?? 1
+                Ticks = obj["Ticks"]?.ToObject<uint>() ?? 1
             };
         }
 
@@ -294,8 +292,17 @@ namespace GameRL.Harmony
         {
             return new ResetMessage
             {
-                Seed = obj["seed"]?.ToObject<ulong?>(),
-                Scenario = obj["scenario"]?.ToString()
+                Seed = obj["Seed"]?.ToObject<ulong?>(),
+                Scenario = obj["Scenario"]?.ToString()
+            };
+        }
+
+        private ConfigureStreamsMessage ParseConfigureStreams(JObject obj)
+        {
+            return new ConfigureStreamsMessage
+            {
+                AgentId = obj["AgentId"]?.ToString() ?? "",
+                Profile = obj["Profile"]?.ToString() ?? "default"
             };
         }
 
@@ -318,6 +325,9 @@ namespace GameRL.Harmony
                             break;
                         case ExecuteActionMessage m:
                             OnExecuteAction?.Invoke(m);
+                            break;
+                        case ConfigureStreamsMessage m:
+                            OnConfigureStreams?.Invoke(m);
                             break;
                         case ResetMessage m:
                             OnReset?.Invoke(m);
@@ -388,6 +398,17 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
+        /// Send step results for multiple agents
+        /// </summary>
+        public void SendBatchStepResult(List<StepResultMessage> results)
+        {
+            Send(new BatchStepResultMessage
+            {
+                Results = results ?? new List<StepResultMessage>()
+            });
+        }
+
+        /// <summary>
         /// Send reset complete with initial observation
         /// </summary>
         public void SendResetComplete(object observation, string? stateHash = null)
@@ -423,6 +444,18 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
+        /// Send vision stream configuration response
+        /// </summary>
+        public void SendStreamsConfigured(string agentId, List<Dictionary<string, object>> descriptors)
+        {
+            Send(new StreamsConfiguredMessage
+            {
+                AgentId = agentId,
+                Descriptors = descriptors ?? new List<Dictionary<string, object>>()
+            });
+        }
+
+        /// <summary>
         /// Send state update (async notification)
         /// </summary>
         public void SendStateUpdate(ulong tick, object state, List<GameEvent>? events = null)
@@ -445,10 +478,6 @@ namespace GameRL.Harmony
                 var json = SerializeMessage(message);
                 var data = Encoding.UTF8.GetBytes(json);
 
-                // Diagnostic logging
-                var preview = json.Length > 200 ? json.Substring(0, 200) + "..." : json;
-                Log($"[C#→Rust] len={data.Length} json={preview}");
-
                 // Length prefix (4 bytes, little-endian to match Rust)
                 var lenBytes = BitConverter.GetBytes(data.Length);
 
@@ -466,67 +495,102 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
-        /// Serialize message to JSON with "type" field for Rust serde compatibility
+        /// Serialize message to JSON with "Type" field for Rust serde compatibility (PascalCase)
         /// </summary>
         private string SerializeMessage(GameMessage message)
         {
             var obj = new JObject();
-            obj["type"] = message.Type;
+            obj["Type"] = message.Type;
 
             switch (message)
             {
                 case ReadyMessage m:
-                    obj["name"] = m.Name;
-                    obj["version"] = m.Version;
-                    obj["capabilities"] = JObject.FromObject(new
+                    obj["Name"] = m.Name;
+                    obj["Version"] = m.Version;
+                    obj["Capabilities"] = JObject.FromObject(new
                     {
-                        multi_agent = m.Capabilities.MultiAgent,
-                        max_agents = m.Capabilities.MaxAgents,
-                        deterministic = m.Capabilities.Deterministic,
-                        headless = m.Capabilities.Headless
+                        MultiAgent = m.Capabilities.MultiAgent,
+                        MaxAgents = m.Capabilities.MaxAgents,
+                        Deterministic = m.Capabilities.Deterministic,
+                        Headless = m.Capabilities.Headless
                     });
                     break;
 
                 case StepResultMessage m:
-                    obj["agent_id"] = m.AgentId;
-                    obj["observation"] = JToken.FromObject(m.Observation ?? new object());
-                    obj["reward"] = m.Reward;
-                    obj["reward_components"] = JToken.FromObject(m.RewardComponents ?? new Dictionary<string, double>());
-                    obj["done"] = m.Done;
-                    obj["truncated"] = m.Truncated;
-                    if (m.StateHash != null)
-                        obj["state_hash"] = m.StateHash;
+                {
+                    var stepObj = SerializeStepResult(m);
+                    foreach (var prop in stepObj)
+                    {
+                        obj[prop.Key] = prop.Value;
+                    }
                     break;
+                }
+
+                case BatchStepResultMessage m:
+                {
+                    var results = new JArray();
+                    foreach (var result in m.Results ?? new List<StepResultMessage>())
+                    {
+                        results.Add(SerializeStepResult(result));
+                    }
+                    obj["Results"] = results;
+                    break;
+                }
 
                 case ResetCompleteMessage m:
-                    obj["observation"] = JToken.FromObject(m.Observation ?? new object());
+                    obj["Observation"] = JToken.FromObject(m.Observation ?? new object());
                     if (m.StateHash != null)
-                        obj["state_hash"] = m.StateHash;
+                        obj["StateHash"] = m.StateHash;
                     break;
 
                 case AgentRegisteredMessage m:
-                    obj["agent_id"] = m.AgentId;
-                    obj["observation_space"] = JToken.FromObject(m.ObservationSpace ?? new object());
-                    obj["action_space"] = JToken.FromObject(m.ActionSpace ?? new object());
+                    obj["AgentId"] = m.AgentId;
+                    obj["ObservationSpace"] = JToken.FromObject(m.ObservationSpace ?? new object());
+                    obj["ActionSpace"] = JToken.FromObject(m.ActionSpace ?? new object());
                     break;
 
                 case StateHashMessage m:
-                    obj["hash"] = m.Hash;
+                    obj["Hash"] = m.Hash;
+                    break;
+
+                case StreamsConfiguredMessage m:
+                    obj["AgentId"] = m.AgentId;
+                    obj["Descriptors"] = JToken.FromObject(m.Descriptors ?? new List<Dictionary<string, object>>());
                     break;
 
                 case ErrorMessage m:
-                    obj["code"] = m.Code;
-                    obj["message"] = m.Message;
+                    obj["Code"] = m.Code;
+                    obj["Message"] = m.Message;
                     break;
 
                 case StateUpdateMessage m:
-                    obj["tick"] = m.Tick;
-                    obj["state"] = JToken.FromObject(m.State ?? new object());
-                    obj["events"] = JToken.FromObject(m.Events ?? new List<GameEvent>());
+                    obj["Tick"] = m.Tick;
+                    obj["State"] = JToken.FromObject(m.State ?? new object());
+                    obj["Events"] = JToken.FromObject(m.Events ?? new List<GameEvent>());
                     break;
             }
 
             return obj.ToString(Formatting.None);
+        }
+
+        private static JObject SerializeStepResult(StepResultMessage message)
+        {
+            var obj = new JObject
+            {
+                ["AgentId"] = message.AgentId,
+                ["Observation"] = JToken.FromObject(message.Observation ?? new object()),
+                ["Reward"] = message.Reward,
+                ["RewardComponents"] = JToken.FromObject(message.RewardComponents ?? new Dictionary<string, double>()),
+                ["Done"] = message.Done,
+                ["Truncated"] = message.Truncated
+            };
+
+            if (message.StateHash != null)
+            {
+                obj["StateHash"] = message.StateHash;
+            }
+
+            return obj;
         }
 
         public void Dispose()

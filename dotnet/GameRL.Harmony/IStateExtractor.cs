@@ -20,7 +20,7 @@ namespace GameRL.Harmony
         /// Extract observation for a specific agent
         /// </summary>
         /// <param name="agentId">Agent requesting observation</param>
-        /// <returns>Observation object (will be MessagePack serialized)</returns>
+        /// <returns>Observation object (serialized as JSON on the IPC link)</returns>
         object ExtractObservation(string agentId);
 
         /// <summary>

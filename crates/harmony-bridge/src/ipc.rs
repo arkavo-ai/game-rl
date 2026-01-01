@@ -1,60 +1,72 @@
 //! IPC communication with .NET games
 
-use crate::protocol::{GameCapabilities, GameMessage, deserialize, serialize};
+use crate::protocol::{GameCapabilities, GameMessage, StepResultPayload, deserialize, serialize};
 use async_trait::async_trait;
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
 };
+use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::sync::Mutex;
-use tokio::time::sleep;
-use tracing::{info, warn};
+use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
+use tracing::{debug, error, info, warn};
 
 /// Bridge to a .NET game via IPC
 pub struct HarmonyBridge {
     /// Path to the socket/pipe
     socket_path: String,
-    /// Connection stream (wrapped for async access)
-    stream: Arc<Mutex<Option<Box<dyn AsyncStream>>>>,
+    /// Writer half of the connection
+    writer: Arc<Mutex<Option<Box<dyn AsyncWriter>>>>,
+    /// Channel to send requests to the reader task
+    request_tx: mpsc::Sender<(GameMessage, oneshot::Sender<Result<GameMessage>>)>,
+    /// Broadcast channel for pushed state updates
+    event_tx: broadcast::Sender<StateUpdate>,
     /// Game capabilities received during Ready
     capabilities: Option<GameCapabilities>,
     /// Game name
     game_name: String,
     /// Game version
     game_version: String,
+    /// Background reader task handle
+    _reader_handle: Option<tokio::task::JoinHandle<()>>,
 }
 
-/// Trait for async read/write streams
+/// Trait for async reading
 #[async_trait]
-trait AsyncStream: Send + Sync {
+trait AsyncReader: Send {
     async fn read_message(&mut self) -> Result<Vec<u8>>;
+}
+
+/// Trait for async writing
+#[async_trait]
+trait AsyncWriter: Send + Sync {
     async fn write_message(&mut self, data: &[u8]) -> Result<()>;
 }
 
 impl HarmonyBridge {
     /// Create a new bridge (not connected yet)
     pub fn new(socket_path: &str) -> Self {
+        // Create channels
+        let (request_tx, _request_rx) = mpsc::channel(16);
+        let (event_tx, _) = broadcast::channel(64);
+
         Self {
             socket_path: socket_path.to_string(),
-            stream: Arc::new(Mutex::new(None)),
+            writer: Arc::new(Mutex::new(None)),
+            request_tx,
+            event_tx,
             capabilities: None,
             game_name: "Unknown".into(),
             game_version: "0.0.0".into(),
+            _reader_handle: None,
         }
     }
 
     /// Connect to the game process
     pub async fn connect(&mut self) -> Result<()> {
-        self.connect_internal().await
-    }
-
-    /// Internal connect implementation
-    async fn connect_internal(&mut self) -> Result<()> {
         info!("Connecting to game at {}", self.socket_path);
 
         // Platform-specific connection
@@ -65,20 +77,50 @@ impl HarmonyBridge {
                 .await
                 .map_err(|e| GameRLError::IpcError(format!("Failed to connect: {}", e)))?;
 
-            let mut guard = self.stream.lock().await;
-            *guard = Some(Box::new(UnixStreamWrapper(stream)));
+            // Split into read/write halves
+            let (read_half, write_half) = stream.into_split();
+
+            // Store writer
+            {
+                let mut guard = self.writer.lock().await;
+                *guard = Some(Box::new(UnixWriteWrapper(write_half)));
+            }
+
+            // Create new channels for this connection
+            let (request_tx, request_rx) = mpsc::channel(16);
+            self.request_tx = request_tx;
+
+            // Spawn background reader task
+            let event_tx = self.event_tx.clone();
+            let handle = tokio::spawn(reader_task(
+                UnixReadWrapper(read_half),
+                request_rx,
+                event_tx,
+            ));
+            self._reader_handle = Some(handle);
         }
 
         #[cfg(windows)]
         {
-            // Windows named pipe support would go here
             return Err(GameRLError::IpcError(
                 "Windows named pipes not yet implemented".into(),
             ));
         }
 
-        // Wait for Ready message
-        let msg = self.recv_internal().await?;
+        // Wait for Ready message by sending a dummy request that expects Ready
+        // The reader task will handle routing the response
+        let (response_tx, response_rx) = oneshot::channel();
+        // Send an empty marker - the first message from the game is Ready
+        self.request_tx
+            .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
+            .await
+            .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
+
+        // Wait for Ready response
+        let msg = response_rx
+            .await
+            .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
+
         match msg {
             GameMessage::Ready {
                 name,
@@ -91,138 +133,54 @@ impl HarmonyBridge {
                 self.capabilities = Some(capabilities);
                 Ok(())
             }
-            _ => Err(GameRLError::ProtocolError("Expected Ready message".into())),
+            _ => Err(GameRLError::ProtocolError(format!(
+                "Expected Ready message, got {:?}",
+                msg
+            ))),
         }
     }
 
-    /// Check if connected
-    async fn is_connected(&self) -> bool {
-        let guard = self.stream.lock().await;
-        guard.is_some()
-    }
-
-    /// Disconnect (clear the stream)
-    async fn disconnect(&self) {
-        let mut guard = self.stream.lock().await;
-        *guard = None;
-    }
-
-    /// Ensure we're connected, attempting reconnection if needed
-    async fn ensure_connected(&mut self) -> Result<()> {
-        if self.is_connected().await {
-            return Ok(());
-        }
-
-        // Try to reconnect with exponential backoff
-        let max_attempts = 5;
-        let mut delay = Duration::from_millis(100);
-
-        for attempt in 1..=max_attempts {
-            warn!("Connection lost, attempting reconnect ({}/{})", attempt, max_attempts);
-
-            match self.connect_internal().await {
-                Ok(()) => {
-                    info!("Reconnected successfully");
-                    return Ok(());
-                }
-                Err(e) => {
-                    if attempt < max_attempts {
-                        warn!("Reconnect failed: {}, retrying in {:?}", e, delay);
-                        sleep(delay).await;
-                        delay = std::cmp::min(delay * 2, Duration::from_secs(5));
-                    } else {
-                        return Err(e);
-                    }
-                }
-            }
-        }
-
-        Err(GameRLError::IpcError("Failed to reconnect after max attempts".into()))
-    }
-
-    /// Send a message to the game (internal, no reconnection)
-    async fn send_internal(&self, msg: &GameMessage) -> Result<()> {
-        let data = serialize(msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
-
-        // Diagnostic logging
-        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        info!("[Rust→C#] len={} json={}", data.len(), json_preview);
-
-        let mut guard = self.stream.lock().await;
-        let stream = guard
-            .as_mut()
-            .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
-
-        stream.write_message(&data).await
-    }
-
-    /// Receive a message from the game (internal, no reconnection)
-    async fn recv_internal(&self) -> Result<GameMessage> {
-        let mut guard = self.stream.lock().await;
-        let stream = guard
-            .as_mut()
-            .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
-
-        let data = stream.read_message().await?;
-
-        // Diagnostic logging - show raw bytes and JSON
-        let first_bytes: Vec<u8> = data.iter().take(20).cloned().collect();
-        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        info!("[C#→Rust] len={} first_bytes={:?} json={}", data.len(), first_bytes, json_preview);
-
-        deserialize(&data).map_err(|e| {
-            warn!("[C#→Rust] Deserialize failed: {}", e);
-            GameRLError::SerializationError(e.to_string())
-        })
-    }
-
-    /// Send a message to the game with reconnection support
-    async fn send(&mut self, msg: GameMessage) -> Result<()> {
-        // Try to send, reconnect on failure
-        if let Err(e) = self.send_internal(&msg).await {
-            warn!("Send failed: {}, attempting reconnect", e);
-            self.disconnect().await;
-            self.ensure_connected().await?;
-            self.send_internal(&msg).await
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Receive a message from the game with reconnection support
-    /// Used for async notifications (state updates, events) - not yet implemented in protocol
-    #[allow(dead_code)]
-    async fn recv(&mut self) -> Result<GameMessage> {
-        // Try to receive, reconnect on failure
-        match self.recv_internal().await {
-            Ok(msg) => Ok(msg),
-            Err(e) => {
-                warn!("Recv failed: {}, attempting reconnect", e);
-                self.disconnect().await;
-                self.ensure_connected().await?;
-                self.recv_internal().await
-            }
-        }
-    }
-
-    /// Send and wait for response with reconnection support
+    /// Send a message and wait for response
     async fn request(&mut self, msg: GameMessage) -> Result<GameMessage> {
-        // Try the full request, reconnect on any failure
-        match self.request_internal(&msg).await {
-            Ok(response) => Ok(response),
-            Err(e) => {
-                warn!("Request failed: {}, attempting reconnect", e);
-                self.disconnect().await;
-                self.ensure_connected().await?;
-                self.request_internal(&msg).await
-            }
+        let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
+
+        // Log outgoing message
+        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
+        debug!("[Rust→C#] len={} json={}", data.len(), json_preview);
+
+        // Send through writer
+        {
+            let mut guard = self.writer.lock().await;
+            let writer = guard
+                .as_mut()
+                .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
+            writer.write_message(&data).await?;
         }
+
+        // Wait for response via channel
+        let (response_tx, response_rx) = oneshot::channel();
+        self.request_tx
+            .send((msg, response_tx))
+            .await
+            .map_err(|_| GameRLError::IpcError("Reader task not running".into()))?;
+
+        response_rx
+            .await
+            .map_err(|_| GameRLError::IpcError("Reader task died waiting for response".into()))?
     }
 
-    /// Send and wait for response (internal, no reconnection)
-    async fn request_internal(&self, msg: &GameMessage) -> Result<GameMessage> {
-        self.send_internal(msg).await?;
-        self.recv_internal().await
+    /// Send a message without waiting for response (fire-and-forget)
+    async fn send(&mut self, msg: GameMessage) -> Result<()> {
+        let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
+
+        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
+        debug!("[Rust→C#] len={} json={}", data.len(), json_preview);
+
+        let mut guard = self.writer.lock().await;
+        let writer = guard
+            .as_mut()
+            .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
+        writer.write_message(&data).await
     }
 
     /// Get game manifest from capabilities
@@ -302,31 +260,34 @@ impl GameEnvironment for HarmonyBridge {
             })
             .await?;
 
-        match response {
-            GameMessage::StepResult {
-                agent_id,
-                observation,
-                reward,
-                reward_components,
-                done,
-                truncated,
-                state_hash,
-            } => Ok(StepResult {
-                agent_id,
+        fn build_step_result(payload: StepResultPayload) -> StepResult {
+            StepResult {
+                agent_id: payload.agent_id,
                 step_id: 0, // TODO: track step count
                 tick: 0,    // TODO: track tick
-                observation,
-                reward,
-                reward_components,
-                done,
-                truncated,
+                observation: payload.observation,
+                reward: payload.reward,
+                reward_components: payload.reward_components,
+                done: payload.done,
+                truncated: payload.truncated,
                 termination_reason: None,
                 events: vec![],
                 frame_ids: HashMap::new(),
                 available_actions: None,
                 metrics: None,
-                state_hash,
-            }),
+                state_hash: payload.state_hash,
+            }
+        }
+
+        match response {
+            GameMessage::StepResult { result } => Ok(build_step_result(result)),
+            GameMessage::BatchStepResult { results } => results
+                .into_iter()
+                .find(|result| &result.agent_id == agent_id)
+                .map(build_step_result)
+                .ok_or_else(|| {
+                    GameRLError::ProtocolError("BatchStepResult missing requested agent".into())
+                }),
             GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
                 "Error {}: {}",
                 code, message
@@ -363,11 +324,35 @@ impl GameEnvironment for HarmonyBridge {
 
     async fn configure_streams(
         &mut self,
-        _agent_id: &AgentId,
-        _profile: &str,
+        agent_id: &AgentId,
+        profile: &str,
     ) -> Result<Vec<StreamDescriptor>> {
-        // Vision streams not yet implemented for Harmony bridge
-        Ok(vec![])
+        let response = self
+            .request(GameMessage::ConfigureStreams {
+                agent_id: agent_id.clone(),
+                profile: profile.to_string(),
+            })
+            .await?;
+
+        match response {
+            GameMessage::StreamsConfigured {
+                agent_id: response_agent_id,
+                descriptors,
+            } => {
+                if &response_agent_id != agent_id {
+                    warn!(
+                        "StreamsConfigured agent mismatch: expected {}, got {}",
+                        agent_id, response_agent_id
+                    );
+                }
+                Ok(descriptors)
+            }
+            GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
+                "Error {}: {}",
+                code, message
+            ))),
+            _ => Err(GameRLError::ProtocolError("Unexpected response".into())),
+        }
     }
 
     async fn save_trajectory(&self, _path: &str) -> Result<()> {
@@ -384,42 +369,133 @@ impl GameEnvironment for HarmonyBridge {
 
     async fn shutdown(&mut self) -> Result<()> {
         self.send(GameMessage::Shutdown).await?;
-        let mut guard = self.stream.lock().await;
+        let mut guard = self.writer.lock().await;
         *guard = None;
         Ok(())
     }
+
+    fn subscribe_events(&self) -> Option<broadcast::Receiver<StateUpdate>> {
+        Some(self.event_tx.subscribe())
+    }
 }
 
-// Unix stream wrapper
+/// Background reader task that handles incoming messages
+async fn reader_task<R: AsyncReader>(
+    mut reader: R,
+    mut request_rx: mpsc::Receiver<(GameMessage, oneshot::Sender<Result<GameMessage>>)>,
+    event_tx: broadcast::Sender<StateUpdate>,
+) {
+    // Queue of pending response channels (FIFO - responses come in order)
+    let mut pending: Vec<oneshot::Sender<Result<GameMessage>>> = Vec::new();
+
+    loop {
+        tokio::select! {
+            // New request from main task
+            req = request_rx.recv() => {
+                match req {
+                    Some((_msg, response_tx)) => {
+                        pending.push(response_tx);
+                    }
+                    None => {
+                        // Channel closed, exit
+                        debug!("Request channel closed, reader task exiting");
+                        break;
+                    }
+                }
+            }
+
+            // Message from game
+            msg_result = reader.read_message() => {
+                match msg_result {
+                    Ok(data) => {
+                        // Log incoming message
+                        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
+                        debug!("[C#→Rust] len={} json={}", data.len(), json_preview);
+
+                        match deserialize(&data) {
+                            Ok(msg) => {
+                                match msg {
+                                    // Push notification - broadcast to subscribers
+                                    GameMessage::StateUpdate { tick, state, events } => {
+                                        let update = StateUpdate {
+                                            tick,
+                                            state,
+                                            events,
+                                        };
+                                        // Ignore send errors (no subscribers)
+                                        let _ = event_tx.send(update);
+                                    }
+
+                                    // Response to a pending request
+                                    _ => {
+                                        if let Some(response_tx) = pending.pop() {
+                                            let _ = response_tx.send(Ok(msg));
+                                        } else {
+                                            warn!("Received response but no pending request: {:?}", msg);
+                                        }
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to deserialize message: {}", e);
+                                // Send error to pending request if any
+                                if let Some(response_tx) = pending.pop() {
+                                    let _ = response_tx.send(Err(GameRLError::SerializationError(e.to_string())));
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Reader task failed: {}", e);
+                        // Notify all pending requests of failure
+                        for response_tx in pending.drain(..) {
+                            let _ = response_tx.send(Err(GameRLError::IpcError("Connection lost".into())));
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Unix read wrapper (for split stream)
 #[cfg(unix)]
-struct UnixStreamWrapper(tokio::net::UnixStream);
+struct UnixReadWrapper(tokio::net::unix::OwnedReadHalf);
 
 #[cfg(unix)]
 #[async_trait]
-impl AsyncStream for UnixStreamWrapper {
+impl AsyncReader for UnixReadWrapper {
     async fn read_message(&mut self) -> Result<Vec<u8>> {
-        use tokio::time::timeout;
-
-        // Timeout for IPC reads - 120 seconds to allow for large tick counts
-        const READ_TIMEOUT: Duration = Duration::from_secs(120);
+        // No timeout - wait indefinitely for messages.
+        // Dead connections are detected via socket close/EOF.
+        // This supports both request/response and push events.
 
         // Read length-prefixed message
         let mut len_bytes = [0u8; 4];
-        timeout(READ_TIMEOUT, self.0.read_exact(&mut len_bytes))
+        self.0
+            .read_exact(&mut len_bytes)
             .await
-            .map_err(|_| GameRLError::IpcError("Read timeout (120s) - game may be processing large tick count".into()))?
             .map_err(|e| GameRLError::IpcError(format!("Read length failed: {}", e)))?;
         let len = u32::from_le_bytes(len_bytes) as usize;
 
         let mut data = vec![0u8; len];
-        timeout(READ_TIMEOUT, self.0.read_exact(&mut data))
+        self.0
+            .read_exact(&mut data)
             .await
-            .map_err(|_| GameRLError::IpcError("Read timeout (120s) - game may be processing large tick count".into()))?
             .map_err(|e| GameRLError::IpcError(format!("Read data failed: {}", e)))?;
 
         Ok(data)
     }
+}
 
+// Unix write wrapper (for split stream)
+#[cfg(unix)]
+struct UnixWriteWrapper(tokio::net::unix::OwnedWriteHalf);
+
+#[cfg(unix)]
+#[async_trait]
+impl AsyncWriter for UnixWriteWrapper {
     async fn write_message(&mut self, data: &[u8]) -> Result<()> {
         let len = (data.len() as u32).to_le_bytes();
         self.0

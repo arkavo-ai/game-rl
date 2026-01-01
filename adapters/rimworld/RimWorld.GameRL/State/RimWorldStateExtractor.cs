@@ -11,94 +11,113 @@ using Verse.AI;
 using RimWorld;
 using GameRL.Harmony;
 using GameRL.Harmony.Protocol;
-using MessagePack;
 
 namespace RimWorld.GameRL.State
 {
     /// <summary>
+    /// Feedback from last action execution
+    /// </summary>
+    public class ActionFeedback
+    {
+        public bool Success { get; set; }
+
+        public string ActionType { get; set; } = "";
+
+        public string? Message { get; set; }
+
+        public string? ErrorCode { get; set; }
+    }
+
+    /// <summary>
     /// Complete observation state
     /// </summary>
-    [MessagePackObject]
     public class RimWorldObservation
     {
-        [Key("tick")]
         public ulong Tick { get; set; }
 
-        [Key("colonist_count")]
         public int ColonistCount { get; set; }
 
-        [Key("colonists")]
         public List<ColonistState> Colonists { get; set; } = new();
 
-        [Key("resources")]
         public ResourceState Resources { get; set; } = new();
 
-        [Key("weather")]
         public string? Weather { get; set; }
 
-        [Key("season")]
         public string? Season { get; set; }
 
-        [Key("hour")]
         public int Hour { get; set; }
 
-        [Key("threats")]
         public List<ThreatInfo> Threats { get; set; } = new();
 
-        [Key("visitors")]
         public List<VisitorState> Visitors { get; set; } = new();
 
-        [Key("entities")]
         public EntityIndex Entities { get; set; } = new();
 
-        [Key("alerts")]
         public List<string> Alerts { get; set; } = new();
 
-        [Key("temperature")]
         public float Temperature { get; set; }
 
-        [Key("idle_colonists")]
         public int IdleColonists { get; set; }
+
+        /// <summary>
+        /// Feedback from the last action (for RL agents)
+        /// </summary>
+        public ActionFeedback? LastAction { get; set; }
+
+        /// <summary>
+        /// Episode metadata for RL context
+        /// </summary>
+        public EpisodeInfo? Episode { get; set; }
+    }
+
+    /// <summary>
+    /// Episode tracking info for RL
+    /// </summary>
+    public class EpisodeInfo
+    {
+        /// <summary>
+        /// Ticks since episode start
+        /// </summary>
+        public int TicksElapsed { get; set; }
+
+        /// <summary>
+        /// Maximum ticks before truncation (15 in-game days)
+        /// </summary>
+        public int MaxTicks { get; set; } = 60000 * 15;
+
+        /// <summary>
+        /// Progress through episode (0.0 to 1.0)
+        /// </summary>
+        public float Progress { get; set; }
     }
 
     /// <summary>
     /// Visitor/guest state for observations
     /// </summary>
-    [MessagePackObject]
     public class VisitorState
     {
-        [Key("id")]
         public string Id { get; set; } = "";
 
-        [Key("name")]
         public string Name { get; set; } = "";
 
-        [Key("position")]
         public float[] Position { get; set; } = new float[2];
 
-        [Key("faction")]
         public string? Faction { get; set; }
 
-        [Key("relation")]
         public string? Relation { get; set; }  // ally, neutral, etc.
 
-        [Key("health")]
         public float Health { get; set; }
     }
 
     /// <summary>
     /// Threat information
     /// </summary>
-    [MessagePackObject]
     public class ThreatInfo
     {
-        [Key("type")]
         public string Type { get; set; } = "";
 
-        [Key("severity")]
         public int Severity { get; set; }
 
-        [Key("count")]
         public int Count { get; set; }
     }
 
@@ -108,6 +127,31 @@ namespace RimWorld.GameRL.State
     public class RimWorldStateExtractor : IStateExtractor
     {
         private readonly List<GameEvent> _pendingEvents = new();
+        private readonly Dictionary<string, ulong> _lastEventTick = new();
+
+        // Rate limiting: minimum ticks between events of same type
+        private const int MinTicksBetweenSameEvent = 60;  // ~1 second at normal speed
+
+        // TTL: maximum age of events before they're dropped (in ticks)
+        private const int MaxEventAgeTicks = 2500;  // ~42 seconds at normal speed
+
+        // Maximum pending events to prevent memory bloat
+        private const int MaxPendingEvents = 100;
+
+        /// <summary>
+        /// Last action result to include in observation (set by executor)
+        /// </summary>
+        public Actions.ActionResult? LastActionResult { get; set; }
+
+        /// <summary>
+        /// Episode start tick (set by executor on reset)
+        /// </summary>
+        public int EpisodeStartTick { get; set; }
+
+        /// <summary>
+        /// Max ticks per episode before truncation
+        /// </summary>
+        public const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
 
         public ulong CurrentTick => (ulong)(Find.TickManager?.TicksGame ?? 0);
 
@@ -133,6 +177,28 @@ namespace RimWorld.GameRL.State
                 IdleColonists = CountIdleColonists(map)
             };
 
+            // Include last action feedback for RL
+            if (LastActionResult != null)
+            {
+                observation.LastAction = new ActionFeedback
+                {
+                    Success = LastActionResult.Success,
+                    ActionType = LastActionResult.ActionType,
+                    Message = LastActionResult.Message,
+                    ErrorCode = LastActionResult.ErrorCode?.ToString()
+                };
+            }
+
+            // Include episode metadata
+            var currentTick = Find.TickManager?.TicksGame ?? 0;
+            var ticksElapsed = currentTick - EpisodeStartTick;
+            observation.Episode = new EpisodeInfo
+            {
+                TicksElapsed = ticksElapsed,
+                MaxTicks = MaxEpisodeTicks,
+                Progress = (float)ticksElapsed / MaxEpisodeTicks
+            };
+
             return observation;
         }
 
@@ -141,26 +207,46 @@ namespace RimWorld.GameRL.State
             var visitors = new List<VisitorState>();
             if (map == null) return visitors;
 
-            // Get all non-hostile, non-colonist humanlike pawns on the map
-            var visitorPawns = map.mapPawns.AllPawnsSpawned
-                .Where(p => p.RaceProps.Humanlike
-                    && p.Faction != null
-                    && p.Faction != Faction.OfPlayer
-                    && !p.HostileTo(Faction.OfPlayer)
-                    && !p.IsPrisoner);
-
-            foreach (var pawn in visitorPawns)
+            // Snapshot to avoid collection modification during iteration
+            List<Pawn> pawnSnapshot;
+            try
             {
-                var factionRelation = pawn.Faction?.RelationKindWith(Faction.OfPlayer);
-                visitors.Add(new VisitorState
+                pawnSnapshot = map.mapPawns.AllPawnsSpawned.ToList();
+            }
+            catch
+            {
+                return visitors;
+            }
+
+            // Get all non-hostile, non-colonist humanlike pawns on the map
+            foreach (var pawn in pawnSnapshot)
+            {
+                if (pawn == null || pawn.Destroyed || !pawn.Spawned) continue;
+
+                try
                 {
-                    Id = pawn.ThingID,
-                    Name = pawn.LabelShort,
-                    Position = new float[] { pawn.Position.x, pawn.Position.z },
-                    Faction = pawn.Faction?.Name,
-                    Relation = factionRelation?.ToString(),
-                    Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f
-                });
+                    if (pawn.RaceProps.Humanlike
+                        && pawn.Faction != null
+                        && pawn.Faction != Faction.OfPlayer
+                        && !pawn.HostileTo(Faction.OfPlayer)
+                        && !pawn.IsPrisoner)
+                    {
+                        var factionRelation = pawn.Faction?.RelationKindWith(Faction.OfPlayer);
+                        visitors.Add(new VisitorState
+                        {
+                            Id = pawn.ThingID,
+                            Name = pawn.LabelShort,
+                            Position = new float[] { pawn.Position.x, pawn.Position.z },
+                            Faction = pawn.Faction?.Name,
+                            Relation = factionRelation?.ToString(),
+                            Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f
+                        });
+                    }
+                }
+                catch
+                {
+                    // Skip pawns that throw during extraction
+                }
             }
 
             return visitors;
@@ -180,12 +266,26 @@ namespace RimWorld.GameRL.State
                     System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
                 if (activeAlertsField?.GetValue(alertsReadout) is List<Alert> activeAlerts)
                 {
-                    foreach (var alert in activeAlerts)
+                    // CRITICAL: Take a snapshot to avoid collection modified during iteration
+                    // The GUI thread can modify activeAlerts while we're reading it
+                    var alertSnapshot = activeAlerts.ToList();
+
+                    foreach (var alert in alertSnapshot)
                     {
-                        var label = alert.GetLabel();
-                        if (!string.IsNullOrEmpty(label))
+                        if (alert == null) continue;
+
+                        try
                         {
-                            alerts.Add(label);
+                            // GetLabel() can trigger GUI code that accesses null state
+                            var label = alert.GetLabel();
+                            if (!string.IsNullOrEmpty(label))
+                            {
+                                alerts.Add(label);
+                            }
+                        }
+                        catch
+                        {
+                            // Skip alerts that throw during GetLabel()
                         }
                     }
                 }
@@ -201,8 +301,16 @@ namespace RimWorld.GameRL.State
         {
             if (map == null) return 0;
 
-            return map.mapPawns.FreeColonists
-                .Count(p => !p.Downed && !p.InMentalState && p.CurJob?.def == JobDefOf.Wait_Wander);
+            try
+            {
+                // Take snapshot to avoid collection modification
+                var colonists = map.mapPawns.FreeColonists.ToList();
+                return colonists.Count(p => p != null && !p.Destroyed && !p.Downed && !p.InMentalState && p.CurJob?.def == JobDefOf.Wait_Wander);
+            }
+            catch
+            {
+                return 0;
+            }
         }
 
         private List<ThreatInfo> ExtractThreats(Map? map)
@@ -210,32 +318,39 @@ namespace RimWorld.GameRL.State
             var threats = new List<ThreatInfo>();
             if (map == null) return threats;
 
-            // Count hostile pawns
-            var hostileCount = map.mapPawns.AllPawnsSpawned
-                .Where(p => p.HostileTo(Faction.OfPlayer))
-                .Count();
-
-            if (hostileCount > 0)
+            try
             {
-                threats.Add(new ThreatInfo
+                // Count hostile pawns - snapshot to avoid collection modification
+                var pawnSnapshot = map.mapPawns.AllPawnsSpawned.ToList();
+                var hostileCount = pawnSnapshot
+                    .Count(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer));
+
+                if (hostileCount > 0)
                 {
-                    Type = "hostile_pawns",
-                    Severity = hostileCount > 10 ? 3 : hostileCount > 5 ? 2 : 1,
-                    Count = hostileCount
-                });
+                    threats.Add(new ThreatInfo
+                    {
+                        Type = "hostile_pawns",
+                        Severity = hostileCount > 10 ? 3 : hostileCount > 5 ? 2 : 1,
+                        Count = hostileCount
+                    });
+                }
+
+                // Check for fires - snapshot to avoid collection modification
+                var fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire)?.ToList();
+                var fireCount = fires?.Count ?? 0;
+                if (fireCount > 0)
+                {
+                    threats.Add(new ThreatInfo
+                    {
+                        Type = "fire",
+                        Severity = fireCount > 20 ? 3 : fireCount > 5 ? 2 : 1,
+                        Count = fireCount
+                    });
+                }
             }
-
-            // Check for fires
-            var fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire);
-            var fireCount = fires?.Count ?? 0;
-            if (fireCount > 0)
+            catch
             {
-                threats.Add(new ThreatInfo
-                {
-                    Type = "fire",
-                    Severity = fireCount > 20 ? 3 : fireCount > 5 ? 2 : 1,
-                    Count = fireCount
-                });
+                // Return empty threats on error
             }
 
             return threats;
@@ -246,39 +361,82 @@ namespace RimWorld.GameRL.State
             var map = Find.CurrentMap;
             if (map == null) return "sha256:no-map";
 
-            var sb = new StringBuilder();
-
-            // Hash colonist positions and health
-            foreach (var pawn in map.mapPawns.FreeColonists)
+            try
             {
-                sb.Append($"{pawn.ThingID}:{pawn.Position}:{pawn.health.summaryHealth.SummaryHealthPercent:F2};");
+                var sb = new StringBuilder();
+
+                // Hash colonist positions and health - snapshot to avoid collection modification
+                var colonists = map.mapPawns.FreeColonists.ToList();
+                foreach (var pawn in colonists)
+                {
+                    if (pawn == null || pawn.Destroyed) continue;
+                    try
+                    {
+                        sb.Append($"{pawn.ThingID}:{pawn.Position}:{pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f:F2};");
+                    }
+                    catch
+                    {
+                        // Skip pawns that throw
+                    }
+                }
+
+                // Hash key resources
+                sb.Append($"wealth:{map.wealthWatcher?.WealthTotal ?? 0:F0};");
+                sb.Append($"tick:{Find.TickManager?.TicksGame ?? 0};");
+
+                using var sha = SHA256.Create();
+                var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
+                return $"sha256:{BitConverter.ToString(hash).Replace("-", "").ToLower()}";
             }
-
-            // Hash key resources
-            sb.Append($"wealth:{map.wealthWatcher.WealthTotal:F0};");
-            sb.Append($"tick:{Find.TickManager.TicksGame};");
-
-            using var sha = SHA256.Create();
-            var hash = sha.ComputeHash(Encoding.UTF8.GetBytes(sb.ToString()));
-            return $"sha256:{BitConverter.ToString(hash).Replace("-", "").ToLower()}";
+            catch
+            {
+                return "sha256:error";
+            }
         }
 
         public List<GameEvent> CollectEvents()
         {
-            var events = new List<GameEvent>(_pendingEvents);
+            var now = CurrentTick;
+
+            // Filter out expired events (TTL enforcement)
+            var validEvents = _pendingEvents
+                .Where(e => now - e.Tick <= MaxEventAgeTicks)
+                .ToList();
+
             _pendingEvents.Clear();
-            return events;
+            return validEvents;
         }
 
         public void RecordEvent(string type, byte severity, object? details = null)
         {
+            var now = CurrentTick;
+
+            // Rate limiting: check if we've recorded this event type too recently
+            if (_lastEventTick.TryGetValue(type, out var lastTick))
+            {
+                if (now - lastTick < MinTicksBetweenSameEvent)
+                {
+                    // Skip this event due to rate limiting
+                    return;
+                }
+            }
+
+            // Enforce max pending events limit
+            if (_pendingEvents.Count >= MaxPendingEvents)
+            {
+                // Remove oldest event to make room
+                _pendingEvents.RemoveAt(0);
+            }
+
             _pendingEvents.Add(new GameEvent
             {
                 EventType = type,
-                Tick = CurrentTick,
+                Tick = now,
                 Severity = severity,
                 Details = details
             });
+
+            _lastEventTick[type] = now;
         }
 
         public object GetObservationSpace(string agentType)

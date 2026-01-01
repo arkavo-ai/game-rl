@@ -23,6 +23,12 @@ namespace RimWorld.GameRL
         private static RimWorldStateExtractor? _stateExtractor;
         private static RimWorldCommandExecutor? _commandExecutor;
         private static readonly Dictionary<string, AgentState> _agents = new();
+        private static readonly Dictionary<string, VisionStreamManager> _visionStreams = new();
+
+        /// <summary>
+        /// Public accessor for state extractor (used by event capture patches)
+        /// </summary>
+        public static RimWorldStateExtractor? StateExtractor => _stateExtractor;
 
         // Step tracking
         private static ulong _currentStepId;
@@ -31,9 +37,19 @@ namespace RimWorld.GameRL
         private static bool _stepInProgress;
         private static bool _forcingTicks;
 
+        // Event push tracking
+        private static int _ticksSinceLastEventPush;
+        private const int EventPushIntervalTicks = 60; // Push events every ~1 second at normal speed
+
         static GameRLMod()
         {
-            Log.Message("[GameRL] Initializing RimWorld adapter...");
+            // Delay initialization to avoid interfering with def resolution
+            LongEventHandler.ExecuteWhenFinished(Initialize);
+        }
+
+        private static void Initialize()
+        {
+            Log.Message("[GameRL] Initializing Arkavo Game-RL adapter...");
 
             try
             {
@@ -56,6 +72,7 @@ namespace RimWorld.GameRL
                 _bridge.OnRegisterAgent += HandleRegisterAgent;
                 _bridge.OnDeregisterAgent += HandleDeregisterAgent;
                 _bridge.OnExecuteAction += HandleExecuteAction;
+                _bridge.OnConfigureStreams += HandleConfigureStreams;
                 _bridge.OnReset += HandleReset;
                 _bridge.OnGetStateHash += HandleGetStateHash;
                 _bridge.OnShutdown += HandleShutdown;
@@ -128,7 +145,7 @@ namespace RimWorld.GameRL
                     _bridge!.SendAgentRegistered(
                         msg.AgentId,
                         _stateExtractor!.GetObservationSpace(msg.AgentType),
-                        _stateExtractor.GetActionSpace(msg.AgentType));
+                        _stateExtractor!.GetActionSpace(msg.AgentType));
                 }
                 else
                 {
@@ -213,8 +230,30 @@ namespace RimWorld.GameRL
             {
                 _commandExecutor?.Reset(msg.Seed, msg.Scenario);
 
-                var observation = _stateExtractor!.ExtractObservation("default");
-                var stateHash = _stateExtractor.ComputeStateHash();
+                // Track episode start for observations
+                _stateExtractor!.EpisodeStartTick = Find.TickManager?.TicksGame ?? 0;
+
+                object observation;
+                if (_agents.Count == 0)
+                {
+                    observation = _stateExtractor!.ExtractObservation("default");
+                }
+                else if (_agents.Count == 1)
+                {
+                    var enumerator = _agents.Keys.GetEnumerator();
+                    enumerator.MoveNext();
+                    observation = _stateExtractor!.ExtractObservation(enumerator.Current);
+                }
+                else
+                {
+                    var observations = new Dictionary<string, object>();
+                    foreach (var agentId in _agents.Keys)
+                    {
+                        observations[agentId] = _stateExtractor!.ExtractObservation(agentId);
+                    }
+                    observation = observations;
+                }
+                var stateHash = _stateExtractor!.ComputeStateHash();
                 _bridge?.SendResetComplete(observation, stateHash);
             }
             catch (Exception ex)
@@ -230,9 +269,36 @@ namespace RimWorld.GameRL
             _bridge?.SendStateHash(hash);
         }
 
+        private static void HandleConfigureStreams(ConfigureStreamsMessage msg)
+        {
+            Log.Message($"[GameRL] Configure streams for agent: {msg.AgentId} ({msg.Profile})");
+
+            try
+            {
+                var profile = string.IsNullOrEmpty(msg.Profile) ? "default" : msg.Profile;
+                var stream = GetOrCreateVisionStream(profile);
+                var descriptors = new List<Dictionary<string, object>>
+                {
+                    stream.BuildDescriptor()
+                };
+
+                _bridge?.SendStreamsConfigured(msg.AgentId, descriptors);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[GameRL] Configure streams error: {ex}");
+                _bridge?.SendError(-32603, ex.Message);
+            }
+        }
+
         private static void HandleShutdown()
         {
             Log.Message("[GameRL] Shutdown requested");
+            foreach (var stream in _visionStreams.Values)
+            {
+                stream.Dispose();
+            }
+            _visionStreams.Clear();
             _bridge?.Dispose();
             _bridge = null;
         }
@@ -259,6 +325,40 @@ namespace RimWorld.GameRL
                     CompleteStep();
                 }
             }
+
+            // Push events periodically (only when not in a step, to avoid interference)
+            if (!_stepInProgress && _stateExtractor != null && _bridge != null)
+            {
+                _ticksSinceLastEventPush++;
+                if (_ticksSinceLastEventPush >= EventPushIntervalTicks)
+                {
+                    PushPendingEvents();
+                    _ticksSinceLastEventPush = 0;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Push any pending game events to the connected client
+        /// </summary>
+        private static void PushPendingEvents()
+        {
+            if (_stateExtractor == null || _bridge == null) return;
+
+            var events = _stateExtractor.CollectEvents();
+            if (events.Count == 0) return;
+
+            var tick = (ulong)(Find.TickManager?.TicksGame ?? 0);
+
+            // Build minimal state snapshot for events
+            var state = new Dictionary<string, object>
+            {
+                ["tick"] = tick,
+                ["colony_alive"] = Find.CurrentMap?.mapPawns?.FreeColonistsCount > 0
+            };
+
+            _bridge.SendStateUpdate(tick, state, events);
+            Log.Message($"[GameRL] Pushed {events.Count} events at tick {tick}");
         }
 
         private static void CompleteStep()
@@ -271,19 +371,53 @@ namespace RimWorld.GameRL
             try
             {
                 var (done, truncated, reason) = _commandExecutor.CheckTermination();
-                var observation = _stateExtractor.ExtractObservation(_currentAgentId);
-                var rewardComponents = _commandExecutor.ComputeReward(_currentAgentId);
-                var totalReward = _commandExecutor.GetTotalReward(_currentAgentId);
-                var stateHash = _stateExtractor.ComputeStateHash();
+                foreach (var stream in _visionStreams.Values)
+                {
+                    stream.Capture();
+                }
 
-                _bridge?.SendStepResult(
-                    _currentAgentId,
-                    observation,
-                    totalReward,
-                    rewardComponents,
-                    done,
-                    truncated,
-                    stateHash);
+                // Pass action result to state extractor for observation
+                _stateExtractor.LastActionResult = _commandExecutor.LastActionResult;
+
+                var stateHash = _stateExtractor!.ComputeStateHash();
+
+                if (_agents.Count <= 1)
+                {
+                    var observation = _stateExtractor!.ExtractObservation(_currentAgentId);
+                    var rewardComponents = _commandExecutor.ComputeReward(_currentAgentId);
+                    var totalReward = _commandExecutor.GetTotalReward(_currentAgentId);
+
+                    _bridge?.SendStepResult(
+                        _currentAgentId,
+                        observation,
+                        totalReward,
+                        rewardComponents,
+                        done,
+                        truncated,
+                        stateHash);
+                    return;
+                }
+
+                var results = new List<StepResultMessage>();
+                foreach (var agentId in _agents.Keys)
+                {
+                    var observation = _stateExtractor!.ExtractObservation(agentId);
+                    var rewardComponents = _commandExecutor.ComputeReward(agentId);
+                    var totalReward = _commandExecutor.GetTotalReward(agentId);
+
+                    results.Add(new StepResultMessage
+                    {
+                        AgentId = agentId,
+                        Observation = observation,
+                        Reward = totalReward,
+                        RewardComponents = rewardComponents,
+                        Done = done,
+                        Truncated = truncated,
+                        StateHash = stateHash
+                    });
+                }
+
+                _bridge?.SendBatchStepResult(results);
             }
             catch (Exception ex)
             {
@@ -298,6 +432,41 @@ namespace RimWorld.GameRL
         private class AgentState
         {
             public string AgentType { get; set; } = "";
+        }
+
+        private static VisionStreamManager GetOrCreateVisionStream(string profile)
+        {
+            if (_visionStreams.TryGetValue(profile, out var stream))
+            {
+                return stream;
+            }
+
+            var (width, height) = ParseVisionProfile(profile);
+            var streamId = $"camera_{profile}";
+            var shmPath = Path.Combine(Path.GetTempPath(), $"gamerl-rimworld-{streamId}.shm");
+            stream = new VisionStreamManager(streamId, width, height, shmPath);
+            _visionStreams[profile] = stream;
+            return stream;
+        }
+
+        /// <summary>
+        /// Parse vision profile string (e.g., "256x256", "512x512").
+        /// Falls back to 256x256 for "default" or invalid profiles.
+        /// </summary>
+        private static (int width, int height) ParseVisionProfile(string profile)
+        {
+            var parts = profile.Split('x');
+            if (parts.Length == 2
+                && int.TryParse(parts[0], out var width)
+                && int.TryParse(parts[1], out var height)
+                && width > 0
+                && height > 0)
+            {
+                return (width, height);
+            }
+
+            // Default resolution for named profiles like "default"
+            return (256, 256);
         }
     }
 

@@ -27,8 +27,9 @@ impl AgentRegistry {
         if self.agents.len() >= self.max_agents {
             return Err(RegistryError::CapacityExceeded);
         }
+        // Idempotent: if already registered, just return success
         if self.agents.contains_key(&agent_id) {
-            return Err(RegistryError::AlreadyRegistered(agent_id));
+            return Ok(());
         }
 
         let entry = AgentEntry {

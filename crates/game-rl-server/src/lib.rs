@@ -14,7 +14,8 @@ pub mod registry;
 pub mod tools;
 pub mod transport;
 
-pub use environment::GameEnvironment;
+pub use environment::{GameEnvironment, StateUpdate};
+pub use mcp::Notification;
 pub use registry::AgentRegistry;
 
 use game_rl_core::{GameManifest, Result};

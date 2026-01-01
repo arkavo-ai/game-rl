@@ -17,8 +17,8 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Designate an animal for hunting
         /// </summary>
-        [GameRLAction("designate_hunt", Description = "Mark an animal for hunting")]
-        public static void DesignateHunt([GameRLParam("target_id")] Thing target)
+        [GameRLAction("DesignateHunt", Description = "Mark an animal for hunting")]
+        public static void DesignateHunt([GameRLParam("TargetId")] Thing target)
         {
             if (target == null)
             {
@@ -54,8 +54,8 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Remove hunt designation from an animal
         /// </summary>
-        [GameRLAction("cancel_hunt", Description = "Remove hunting designation from an animal")]
-        public static void CancelHunt([GameRLParam("target_id")] Thing target)
+        [GameRLAction("CancelHunt", Description = "Remove hunting designation from an animal")]
+        public static void CancelHunt([GameRLParam("TargetId")] Thing target)
         {
             if (target == null)
             {
@@ -77,13 +77,13 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Place a building blueprint for construction
         /// </summary>
-        [GameRLAction("place_blueprint", Description = "Place a building blueprint for construction")]
+        [GameRLAction("PlaceBlueprint", Description = "Place a building blueprint for construction")]
         public static void PlaceBlueprint(
-            [GameRLParam("building")] string buildingDefName,
-            int x,
-            int z,
-            int rotation = 0,
-            [GameRLParam("stuff")] string? stuffDefName = null)
+            [GameRLParam("Building")] string buildingDefName,
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Rotation")] int rotation = 0,
+            [GameRLParam("Stuff")] string? stuffDefName = null)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -128,20 +128,36 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            GenConstruct.PlaceBlueprintForBuild(buildingDef, pos, map, rot, Faction.OfPlayer, stuffDef);
-            Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} blueprint at {pos}");
+            // Check if this is a "spot" type building with no construction cost - place instantly
+            bool isInstantBuild = (buildingDef.costList == null || buildingDef.costList.Count == 0)
+                && buildingDef.costStuffCount <= 0;
+
+            if (isInstantBuild)
+            {
+                // Spawn the building directly (for ButcherSpot, Campfire, SleepingSpot, etc.)
+                var building = ThingMaker.MakeThing(buildingDef, stuffDef);
+                building.SetFaction(Faction.OfPlayer);
+                GenSpawn.Spawn(building, pos, map, rot);
+                Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} instantly at {pos}");
+            }
+            else
+            {
+                // Normal construction - create blueprint
+                GenConstruct.PlaceBlueprintForBuild(buildingDef, pos, map, rot, Faction.OfPlayer, stuffDef);
+                Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} blueprint at {pos}");
+            }
         }
 
         /// <summary>
         /// Create a growing zone
         /// </summary>
-        [GameRLAction("create_growing_zone", Description = "Create a growing zone for farming")]
+        [GameRLAction("CreateGrowingZone", Description = "Create a growing zone for farming")]
         public static void CreateGrowingZone(
-            int x,
-            int z,
-            int width = 5,
-            int height = 5,
-            [GameRLParam("plant")] string? plantDefName = null)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Width")] int width = 5,
+            [GameRLParam("Height")] int height = 5,
+            [GameRLParam("Plant")] string? plantDefName = null)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -200,12 +216,12 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Create a stockpile zone
         /// </summary>
-        [GameRLAction("create_stockpile", Description = "Create a stockpile zone for storage")]
+        [GameRLAction("CreateStockpile", Description = "Create a stockpile zone for storage")]
         public static void CreateStockpile(
-            int x,
-            int z,
-            int width = 5,
-            int height = 5)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Width")] int width = 5,
+            [GameRLParam("Height")] int height = 5)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -247,11 +263,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Designate trees for cutting
         /// </summary>
-        [GameRLAction("designate_cut_plants", Description = "Designate plants/trees in an area for cutting")]
+        [GameRLAction("DesignateCutPlants", Description = "Designate plants/trees in an area for cutting")]
         public static void DesignateCutPlants(
-            int x,
-            int z,
-            int radius = 5)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Radius")] int radius = 5)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -284,11 +300,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Designate area for mining
         /// </summary>
-        [GameRLAction("designate_mine", Description = "Designate rocks/ore in an area for mining")]
+        [GameRLAction("DesignateMine", Description = "Designate rocks/ore in an area for mining")]
         public static void DesignateMine(
-            int x,
-            int z,
-            int radius = 3)
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Radius")] int radius = 3)
         {
             var map = Find.CurrentMap;
             if (map == null)
@@ -321,11 +337,11 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// Add a bill to a workbench (e.g., butcher creature at butcher spot)
         /// </summary>
-        [GameRLAction("add_bill", Description = "Add a production bill to a workbench")]
+        [GameRLAction("AddBill", Description = "Add a production bill to a workbench")]
         public static void AddBill(
-            [GameRLParam("building_id")] Thing building,
-            [GameRLParam("recipe")] string recipeDefName,
-            int count = -1)
+            [GameRLParam("BuildingId")] Thing building,
+            [GameRLParam("Recipe")] string recipeDefName,
+            [GameRLParam("Count")] int count = -1)
         {
             if (building == null)
             {
@@ -375,7 +391,7 @@ namespace RimWorld.GameRL.Actions
         /// <summary>
         /// List all buildings that can accept bills (workbenches, production spots)
         /// </summary>
-        [GameRLAction("list_workbenches", Description = "List all workbenches and production buildings")]
+        [GameRLAction("ListWorkbenches", Description = "List all workbenches and production buildings")]
         public static string ListWorkbenches()
         {
             var map = Find.CurrentMap;
@@ -396,6 +412,178 @@ namespace RimWorld.GameRL.Actions
 
             Log.Message($"[GameRL] list_workbenches: Found {workbenches.Count} workbenches");
             return result.ToString();
+        }
+
+        /// <summary>
+        /// Unforbid an item so colonists can interact with it
+        /// </summary>
+        [GameRLAction("Unforbid", Description = "Unforbid an item so colonists can use it")]
+        public static void Unforbid([GameRLParam("ThingId")] Thing thing)
+        {
+            if (thing == null)
+            {
+                Log.Warning("[GameRL] unforbid: Thing not found");
+                return;
+            }
+
+            // Use SetForbidden which handles the check internally
+            // This works for items, corpses, and anything that can be forbidden
+            if (!thing.def.HasComp(typeof(CompForbiddable)) && thing.def.category != ThingCategory.Item)
+            {
+                Log.Warning($"[GameRL] unforbid: {thing.ThingID} cannot be forbidden/unforbidden");
+                return;
+            }
+
+            thing.SetForbidden(false, false);
+            Log.Message($"[GameRL] unforbid: Unforbid {thing.LabelShort}");
+        }
+
+        /// <summary>
+        /// Unforbid all items in a radius
+        /// </summary>
+        [GameRLAction("UnforbidArea", Description = "Unforbid all items in a radius")]
+        public static void UnforbidArea(
+            [GameRLParam("X")] int x,
+            [GameRLParam("Y")] int z,
+            [GameRLParam("Radius")] int radius = 10)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] unforbid_area: No current map");
+                return;
+            }
+
+            var center = new IntVec3(x, 0, z);
+            int count = 0;
+
+            foreach (var cell in GenRadial.RadialCellsAround(center, radius, true))
+            {
+                if (!cell.InBounds(map)) continue;
+
+                var things = cell.GetThingList(map);
+                foreach (var thing in things.ToList())
+                {
+                    if (thing.def.category == ThingCategory.Item && thing.IsForbidden(Faction.OfPlayer))
+                    {
+                        thing.SetForbidden(false, false);
+                        count++;
+                    }
+                }
+            }
+
+            Log.Message($"[GameRL] unforbid_area: Unforbid {count} items around ({x},{z})");
+        }
+
+        /// <summary>
+        /// Unforbid all items of a specific type (e.g., MealSurvivalPack)
+        /// </summary>
+        [GameRLAction("UnforbidByType", Description = "Unforbid all items of a specific type (e.g., MealSurvivalPack)")]
+        public static void UnforbidByType([GameRLParam("DefName")] string defName)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] unforbid_by_type: No current map");
+                return;
+            }
+
+            var def = DefDatabase<ThingDef>.GetNamed(defName, errorOnFail: false);
+            if (def == null)
+            {
+                Log.Warning($"[GameRL] unforbid_by_type: Unknown def: {defName}");
+                return;
+            }
+
+            int count = 0;
+            foreach (var thing in map.listerThings.ThingsOfDef(def))
+            {
+                if (thing.IsForbidden(Faction.OfPlayer))
+                {
+                    thing.SetForbidden(false, false);
+                    count++;
+                }
+            }
+
+            Log.Message($"[GameRL] unforbid_by_type: Unforbid {count} {defName}");
+        }
+
+        /// <summary>
+        /// Remove a bill from a workbench
+        /// </summary>
+        [GameRLAction("CancelBill", Description = "Remove a bill from a workbench")]
+        public static void CancelBill(
+            [GameRLParam("BuildingId")] Thing building,
+            [GameRLParam("BillIndex")] int billIndex = 0)
+        {
+            if (building == null)
+            {
+                Log.Warning("[GameRL] cancel_bill: Building not found");
+                return;
+            }
+
+            var billGiver = building as IBillGiver;
+            if (billGiver == null)
+            {
+                Log.Warning($"[GameRL] cancel_bill: {building.ThingID} cannot accept bills");
+                return;
+            }
+
+            if (billIndex < 0 || billIndex >= billGiver.BillStack.Count)
+            {
+                Log.Warning($"[GameRL] cancel_bill: Bill index {billIndex} out of range (0-{billGiver.BillStack.Count - 1})");
+                return;
+            }
+
+            var bill = billGiver.BillStack[billIndex];
+            billGiver.BillStack.Delete(bill);
+            Log.Message($"[GameRL] cancel_bill: Removed bill {billIndex} from {building.LabelShort}");
+        }
+
+        /// <summary>
+        /// Modify a bill's repeat count or mode
+        /// </summary>
+        [GameRLAction("ModifyBill", Description = "Modify a bill's repeat count or mode")]
+        public static void ModifyBill(
+            [GameRLParam("BuildingId")] Thing building,
+            [GameRLParam("BillIndex")] int billIndex = 0,
+            [GameRLParam("Count")] int? count = null,
+            [GameRLParam("RepeatForever")] bool? repeatForever = null)
+        {
+            if (building == null)
+            {
+                Log.Warning("[GameRL] modify_bill: Building not found");
+                return;
+            }
+
+            var billGiver = building as IBillGiver;
+            if (billGiver == null)
+            {
+                Log.Warning($"[GameRL] modify_bill: {building.ThingID} cannot accept bills");
+                return;
+            }
+
+            if (billIndex < 0 || billIndex >= billGiver.BillStack.Count)
+            {
+                Log.Warning($"[GameRL] modify_bill: Bill index {billIndex} out of range");
+                return;
+            }
+
+            var bill = billGiver.BillStack[billIndex];
+            if (bill is Bill_Production prodBill)
+            {
+                if (repeatForever == true)
+                {
+                    prodBill.repeatMode = BillRepeatModeDefOf.Forever;
+                    Log.Message($"[GameRL] modify_bill: Set bill {billIndex} to repeat forever");
+                }
+                else if (count.HasValue)
+                {
+                    prodBill.repeatMode = BillRepeatModeDefOf.RepeatCount;
+                    prodBill.repeatCount = count.Value;
+                    Log.Message($"[GameRL] modify_bill: Set bill {billIndex} count to {count.Value}");
+                }
+            }
         }
     }
 }

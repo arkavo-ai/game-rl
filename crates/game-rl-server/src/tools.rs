@@ -23,55 +23,85 @@ pub fn list_tools() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "register_agent".into(),
-            description: "Register an agent with the environment".into(),
+            description: "Register an agent to control the game. MUST be called before sim_step. Example: {\"AgentId\": \"commander\", \"AgentType\": \"ColonyManager\"}".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "agent_id": { "type": "string" },
-                    "agent_type": { "type": "string" },
-                    "config": { "type": "object" }
+                    "AgentId": {
+                        "type": "string",
+                        "description": "Your agent's unique ID. Example: \"commander\" or \"agent-1\""
+                    },
+                    "AgentType": {
+                        "type": "string",
+                        "description": "Agent role type. Use \"ColonyManager\" for colony control.",
+                        "enum": ["ColonyManager", "EntityBehavior", "WorldSimulation", "GameMaster", "DialogueAgent", "CombatDirector"],
+                        "default": "ColonyManager"
+                    },
+                    "Config": {
+                        "type": "object",
+                        "description": "Optional configuration"
+                    }
                 },
-                "required": ["agent_id", "agent_type"]
+                "required": ["AgentId", "AgentType"]
             }),
         },
         ToolDef {
             name: "deregister_agent".into(),
-            description: "Deregister an agent".into(),
+            description: "Remove an agent. Example: {\"AgentId\": \"commander\"}".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "agent_id": { "type": "string" }
+                    "AgentId": {
+                        "type": "string",
+                        "description": "The AgentId you registered with"
+                    }
                 },
-                "required": ["agent_id"]
+                "required": ["AgentId"]
             }),
         },
         ToolDef {
             name: "sim_step".into(),
-            description: "Execute action and advance simulation".into(),
+            description: "Execute an action and advance the game. Returns observation with colonists, resources, and reward.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "agent_id": { "type": "string" },
-                    "action": {},
-                    "ticks": { "type": "integer", "default": 1 }
+                    "AgentId": {
+                        "type": "string",
+                        "description": "Your registered AgentId"
+                    },
+                    "Action": {
+                        "type": "object",
+                        "description": "Action object with Type field. Example: {\"Type\": \"Wait\"}"
+                    },
+                    "Ticks": {
+                        "type": "integer",
+                        "description": "Game ticks to simulate (60 ticks = 1 second)",
+                        "default": 1
+                    }
                 },
-                "required": ["agent_id", "action"]
+                "required": ["AgentId", "Action"]
             }),
         },
         ToolDef {
             name: "reset".into(),
-            description: "Reset the environment".into(),
+            description: "Reset environment for new episode. Returns initial observation.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "seed": { "type": "integer" },
-                    "scenario": { "type": "string" }
+                    "Seed": {
+                        "type": "integer",
+                        "description": "Random seed for reproducibility"
+                    },
+                    "Scenario": {
+                        "type": "string",
+                        "description": "Scenario name to load"
+                    }
                 }
             }),
         },
         ToolDef {
             name: "get_state_hash".into(),
-            description: "Get state hash for determinism verification".into(),
+            description: "Get hash of current game state for debugging".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {}
@@ -79,14 +109,20 @@ pub fn list_tools() -> Vec<ToolDef> {
         },
         ToolDef {
             name: "configure_streams".into(),
-            description: "Configure vision streams".into(),
+            description: "Configure vision streams for an agent".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
-                    "agent_id": { "type": "string" },
-                    "profile": { "type": "string" }
+                    "AgentId": {
+                        "type": "string",
+                        "description": "Your registered AgentId"
+                    },
+                    "Profile": {
+                        "type": "string",
+                        "description": "Stream profile (e.g., \"256x256\")"
+                    }
                 },
-                "required": ["agent_id", "profile"]
+                "required": ["AgentId", "Profile"]
             }),
         },
     ]
@@ -94,6 +130,7 @@ pub fn list_tools() -> Vec<ToolDef> {
 
 /// Parameters for register_agent
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct RegisterAgentParams {
     pub agent_id: AgentId,
     pub agent_type: AgentType,
@@ -103,6 +140,7 @@ pub struct RegisterAgentParams {
 
 /// Parameters for sim_step
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct SimStepParams {
     pub agent_id: AgentId,
     pub action: Action,
@@ -116,6 +154,7 @@ fn default_ticks() -> u32 {
 
 /// Parameters for reset
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ResetParams {
     pub seed: Option<u64>,
     pub scenario: Option<String>,
@@ -123,6 +162,7 @@ pub struct ResetParams {
 
 /// Parameters for configure_streams
 #[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ConfigureStreamsParams {
     pub agent_id: AgentId,
     pub profile: String,
@@ -197,6 +237,7 @@ async fn handle_deregister_agent<E: GameEnvironment>(
     registry: &Arc<RwLock<AgentRegistry>>,
 ) -> Result<serde_json::Value> {
     #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
     struct Params {
         agent_id: AgentId,
     }

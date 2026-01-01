@@ -11,9 +11,9 @@ pub enum Action {
     Discrete(i64),
     /// Continuous action vector
     Continuous(Vec<f64>),
-    /// Parameterized action with type field and flattened params
+    /// Parameterized action with Type field and flattened params
     Parameterized {
-        #[serde(rename = "type")]
+        #[serde(rename = "Type")]
         action_type: String,
         /// All other fields become params (flattened for natural JSON format)
         #[serde(flatten, default)]
@@ -25,7 +25,7 @@ pub enum Action {
 
 /// Description of an action space
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum ActionSpace {
     /// Discrete action space
     Discrete {
@@ -58,6 +58,7 @@ pub enum ActionSpace {
 
 /// Definition of a parameterized action
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ActionDefinition {
     /// Action name
     pub name: String,
@@ -71,7 +72,7 @@ pub struct ActionDefinition {
 
 /// Definition of an action parameter
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum ParamDefinition {
     /// String parameter
     String {
@@ -104,8 +105,8 @@ mod tests {
 
     #[test]
     fn test_parameterized_action_flat_params() {
-        // MCP sends flat format - params should be captured via flatten
-        let json = r#"{"type": "set_work_priority", "colonist_id": "Human917", "work_type": "Hunting", "priority": 1}"#;
+        // MCP sends flat format with PascalCase Type field - params should be captured via flatten
+        let json = r#"{"Type": "set_work_priority", "colonist_id": "Human917", "work_type": "Hunting", "priority": 1}"#;
         let action: Action = serde_json::from_str(json).unwrap();
 
         match &action {
@@ -118,16 +119,17 @@ mod tests {
             _ => panic!("Expected Parameterized action, got {:?}", action),
         }
 
-        // Verify serialization preserves flat format
+        // Verify serialization preserves flat format with PascalCase Type
         let serialized = serde_json::to_string(&action).unwrap();
         println!("Serialized: {}", serialized);
+        assert!(serialized.contains("\"Type\":\"set_work_priority\""), "Should have PascalCase Type field");
         assert!(serialized.contains("\"colonist_id\":\"Human917\""), "Should have flat colonist_id");
         assert!(!serialized.contains("\"params\":"), "Should NOT have nested params");
     }
 
     #[test]
     fn test_wait_action() {
-        let json = r#"{"type": "wait"}"#;
+        let json = r#"{"Type": "wait"}"#;
         let action: Action = serde_json::from_str(json).unwrap();
 
         match &action {

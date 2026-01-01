@@ -19,61 +19,206 @@
     "type": "discrete_parameterized",
     "actions": [
       {
-        "name": "set_work_priority",
-        "description": "Set work priority for a colonist",
-        "params": {
-          "colonist_id": {"type": "entity_id"},
-          "work_type": {"type": "string"},
-          "priority": {"type": "int", "min": 0, "max": 4}
-        }
-      },
-      {
-        "name": "draft",
-        "description": "Draft a colonist for direct control",
-        "params": {"colonist_id": {"type": "entity_id"}}
-      },
-      {
-        "name": "undraft",
-        "description": "Release a colonist from draft",
-        "params": {"colonist_id": {"type": "entity_id"}}
-      },
-      {
-        "name": "move",
-        "description": "Move a drafted colonist to a position",
-        "params": {
-          "colonist_id": {"type": "entity_id"},
-          "x": {"type": "int"},
-          "z": {"type": "int"}
-        }
-      },
-      {
-        "name": "wait",
-        "description": "Do nothing this step",
+        "name": "Wait",
+        "description": "Do nothing, just advance simulation",
         "params": {}
+      },
+      {
+        "name": "Draft",
+        "description": "Draft a colonist for direct control",
+        "params": {"ColonistId": {"type": "entity_id", "description": "Colonist ThingID"}}
+      },
+      {
+        "name": "Undraft",
+        "description": "Undraft a colonist",
+        "params": {"ColonistId": {"type": "entity_id"}}
+      },
+      {
+        "name": "Move",
+        "description": "Move a drafted pawn to target coordinates",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "X": {"type": "int", "description": "Target X coordinate"},
+          "Y": {"type": "int", "description": "Target Z coordinate"}
+        }
+      },
+      {
+        "name": "MoveToEntity",
+        "description": "Move a pawn toward a target entity",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "TargetId": {"type": "entity_id", "description": "Target entity ThingID"}
+        }
+      },
+      {
+        "name": "Attack",
+        "description": "Force a drafted pawn to attack a target",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "TargetId": {"type": "entity_id"}
+        }
+      },
+      {
+        "name": "Haul",
+        "description": "Force a pawn to haul an item to a stockpile",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "ItemId": {"type": "entity_id"}
+        }
+      },
+      {
+        "name": "SetWorkPriority",
+        "description": "Set work priority for a colonist (0=disabled, 1=highest, 4=lowest)",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "WorkType": {"type": "string", "description": "Work type defName (e.g., Hunting, Cooking, Mining)"},
+          "Priority": {"type": "int", "min": 0, "max": 4}
+        }
+      },
+      {
+        "name": "Equip",
+        "description": "Have a pawn equip a weapon",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "WeaponId": {"type": "entity_id"}
+        }
+      },
+      {
+        "name": "Chat",
+        "description": "Initiate social interaction with target pawn",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "TargetId": {"type": "entity_id"}
+        }
+      },
+      {
+        "name": "DesignateHunt",
+        "description": "Mark an animal for hunting",
+        "params": {"TargetId": {"type": "entity_id", "description": "Animal ThingID"}}
+      },
+      {
+        "name": "CancelHunt",
+        "description": "Remove hunting designation from an animal",
+        "params": {"TargetId": {"type": "entity_id"}}
+      },
+      {
+        "name": "PlaceBlueprint",
+        "description": "Place a building blueprint for construction (instant for spots)",
+        "params": {
+          "Building": {"type": "string", "description": "Building defName (e.g., Bed, ButcherSpot, Campfire)"},
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Rotation": {"type": "int", "min": 0, "max": 3, "default": 0},
+          "Stuff": {"type": "string", "optional": true, "description": "Material defName (e.g., WoodLog, Steel)"}
+        }
+      },
+      {
+        "name": "CreateGrowingZone",
+        "description": "Create a growing zone for farming",
+        "params": {
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Width": {"type": "int", "default": 5},
+          "Height": {"type": "int", "default": 5},
+          "Plant": {"type": "string", "optional": true, "description": "Plant defName to grow"}
+        }
+      },
+      {
+        "name": "CreateStockpile",
+        "description": "Create a stockpile zone for storage",
+        "params": {
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Width": {"type": "int", "default": 5},
+          "Height": {"type": "int", "default": 5}
+        }
+      },
+      {
+        "name": "DesignateCutPlants",
+        "description": "Designate plants/trees in an area for cutting",
+        "params": {
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Radius": {"type": "int", "default": 5}
+        }
+      },
+      {
+        "name": "DesignateMine",
+        "description": "Designate rocks/ore in an area for mining",
+        "params": {
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Radius": {"type": "int", "default": 3}
+        }
+      },
+      {
+        "name": "AddBill",
+        "description": "Add a production bill to a workbench",
+        "params": {
+          "BuildingId": {"type": "entity_id", "description": "Workbench ThingID"},
+          "Recipe": {"type": "string", "description": "Recipe defName (e.g., ButcherCorpseFlesh)"},
+          "Count": {"type": "int", "default": -1, "description": "-1 for forever, >0 for specific count"}
+        }
+      },
+      {
+        "name": "ListWorkbenches",
+        "description": "List all workbenches and production buildings",
+        "params": {}
+      },
+      {
+        "name": "Unforbid",
+        "description": "Unforbid an item so colonists can use it",
+        "params": {"ThingId": {"type": "entity_id"}}
+      },
+      {
+        "name": "UnforbidArea",
+        "description": "Unforbid all items in a radius",
+        "params": {
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Radius": {"type": "int", "default": 10}
+        }
       }
     ]
   },
   "observation_space": {
     "type": "dict",
     "spaces": {
-      "tick": {"type": "int"},
-      "colonist_count": {"type": "int", "min": 0, "max": 50},
-      "colonists": {"type": "sequence", "max_length": 50},
-      "resources": {"type": "dict"},
-      "weather": {"type": "string"},
-      "season": {"type": "string"},
-      "hour": {"type": "int", "min": 0, "max": 23},
-      "threats": {"type": "sequence"}
+      "Tick": {"type": "int", "description": "Current game tick"},
+      "ColonistCount": {"type": "int", "min": 0, "max": 50},
+      "Colonists": {"type": "sequence", "max_length": 50, "description": "Detailed colonist states"},
+      "Resources": {"type": "dict", "description": "Stockpile counts and wealth"},
+      "Weather": {"type": "string"},
+      "Season": {"type": "string"},
+      "Hour": {"type": "int", "min": 0, "max": 23},
+      "Temperature": {"type": "float"},
+      "Threats": {"type": "sequence"},
+      "Visitors": {"type": "sequence"},
+      "Entities": {"type": "dict", "description": "Categorized entity index (Colonists, Animals, Buildings, etc.)"},
+      "Alerts": {"type": "sequence", "description": "Active game alerts"},
+      "IdleColonists": {"type": "int"},
+      "LastAction": {"type": "dict", "optional": true, "description": "Feedback from last action"},
+      "Episode": {"type": "dict", "description": "Episode progress info"}
     }
   },
   "reward_components": [
-    {"name": "colonist_death", "range": [-100, 0], "description": "Large penalty for colonist deaths"},
-    {"name": "colonist_alive", "range": [0, 0.5], "description": "Small bonus per living colonist"},
-    {"name": "wealth_delta", "range": [-10, 10], "description": "Change in colony wealth"},
-    {"name": "mood", "range": [-0.05, 0.05], "description": "Average colonist mood"},
-    {"name": "idle_penalty", "range": [-0.5, 0], "description": "Penalty for idle colonists"},
-    {"name": "injury_penalty", "range": [-0.5, 0], "description": "Penalty for injured colonists"},
-    {"name": "hunger_penalty", "range": [-0.5, 0], "description": "Penalty for hungry colonists"}
+    {"name": "colonist_death", "range": [-100, 0], "description": "Major penalty per colonist death"},
+    {"name": "colonist_recruited", "range": [0, 10], "description": "Bonus for recruiting new colonists"},
+    {"name": "mood", "range": [-0.1, 0.1], "description": "Average colonist mood (centered at 50%)"},
+    {"name": "hunger", "range": [-0.3, 0], "description": "Penalty for hungry colonists"},
+    {"name": "exhaustion", "range": [-0.5, 0], "description": "Penalty for exhausted colonists"},
+    {"name": "health", "range": [-0.2, 0], "description": "Penalty for injured colonists"},
+    {"name": "idle", "range": [-0.25, 0], "description": "Penalty for idle colonists"},
+    {"name": "wealth", "range": [-0.5, 0.5], "description": "Wealth change (capped)"},
+    {"name": "food_security", "range": [-0.5, 0.5], "description": "Change in days of food stockpiled"},
+    {"name": "food_critical", "range": [-0.2, 0], "description": "Continuous penalty when food < 2 days"},
+    {"name": "threat_eliminated", "range": [0, 5], "description": "Bonus for killing hostiles"},
+    {"name": "threat_appeared", "range": [-1, 0], "description": "Penalty when new hostiles appear"},
+    {"name": "wood_gathered", "range": [0, 0.2], "description": "Bonus for gathering wood"},
+    {"name": "steel_gathered", "range": [0, 0.2], "description": "Bonus for gathering steel"},
+    {"name": "research", "range": [0, 2], "description": "Bonus for research progress"},
+    {"name": "research_complete", "range": [0, 1], "description": "Bonus for completing research"},
+    {"name": "construction", "range": [0, 1], "description": "Bonus for constructing buildings"}
   ],
   "tick_rate": 60,
   "max_episode_ticks": 900000,

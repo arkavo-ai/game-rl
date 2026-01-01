@@ -138,3 +138,36 @@ pub struct ServerInfo {
     pub version: String,
     pub game_rl_version: String,
 }
+
+/// MCP JSON-RPC notification (no id, no response expected)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Notification {
+    pub jsonrpc: String,
+    pub method: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub params: Option<serde_json::Value>,
+}
+
+impl Notification {
+    /// Create a game event notification
+    pub fn game_event(event: &game_rl_core::GameEvent) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/game/event".to_string(),
+            params: Some(serde_json::to_value(event).unwrap_or_default()),
+        }
+    }
+
+    /// Create a state update notification
+    pub fn state_update(tick: u64, state: serde_json::Value, events: Vec<game_rl_core::GameEvent>) -> Self {
+        Self {
+            jsonrpc: "2.0".to_string(),
+            method: "notifications/game/stateUpdate".to_string(),
+            params: Some(serde_json::json!({
+                "tick": tick,
+                "state": state,
+                "events": events
+            })),
+        }
+    }
+}

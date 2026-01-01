@@ -8,6 +8,7 @@ use crate::reward::RewardComponents;
 
 /// Result of a simulation step
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct StepResult {
     /// Agent that took the action
     pub agent_id: AgentId,
@@ -73,7 +74,7 @@ pub enum Observation {
 
 /// Why an episode ended
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "PascalCase")]
 pub enum TerminationReason {
     Success,
     Failure,
@@ -83,9 +84,10 @@ pub enum TerminationReason {
 
 /// Game event that occurred during a step
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct GameEvent {
     /// Event type identifier
-    #[serde(rename = "type")]
+    #[serde(rename = "Type")]
     pub event_type: String,
 
     /// Tick when event occurred
@@ -102,6 +104,7 @@ pub struct GameEvent {
 
 /// Performance metrics for a step
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct StepMetrics {
     /// Total step time in milliseconds
     pub step_ms: f64,

@@ -5,71 +5,66 @@ using System.Linq;
 using Verse;
 using Verse.AI;
 using RimWorld;
-using MessagePack;
 
 namespace RimWorld.GameRL.State
 {
     /// <summary>
+    /// 2D position with explicit X/Y coordinates for LLM clarity
+    /// </summary>
+    public class Position2D
+    {
+        public int X { get; set; }
+        public int Y { get; set; }
+    }
+
+    /// <summary>
+    /// Need state with value and human-readable status
+    /// </summary>
+    public class NeedState
+    {
+        public float Value { get; set; }
+        public string Status { get; set; } = "";
+    }
+
+    /// <summary>
     /// Colonist state for observations
     /// </summary>
-    [MessagePackObject]
     public class ColonistState
     {
-        [Key("id")]
         public string Id { get; set; } = "";
 
-        [Key("name")]
         public string Name { get; set; } = "";
 
-        [Key("position")]
-        public float[] Position { get; set; } = new float[2];
+        public Position2D Position { get; set; } = new();
 
-        [Key("health")]
         public float Health { get; set; }
 
-        [Key("mood")]
         public float Mood { get; set; }
 
-        [Key("hunger")]
         public float Hunger { get; set; }
 
-        [Key("rest")]
         public float Rest { get; set; }
 
-        [Key("current_job")]
         public string? CurrentJob { get; set; }
 
-        [Key("is_drafted")]
         public bool IsDrafted { get; set; }
 
-        [Key("is_downed")]
         public bool IsDowned { get; set; }
 
-        [Key("is_sleeping")]
         public bool IsSleeping { get; set; }
 
-        [Key("mental_state")]
         public string? MentalState { get; set; }
 
-        [Key("can_be_drafted")]
         public bool CanBeDrafted { get; set; }
 
-        [Key("reachable")]
-        public List<string> Reachable { get; set; } = new();
-
-        [Key("weapon")]
         public string? Weapon { get; set; }
 
-        [Key("has_ranged_weapon")]
         public bool HasRangedWeapon { get; set; }
 
-        [Key("needs")]
-        public Dictionary<string, float> Needs { get; set; } = new();
+        public Dictionary<string, NeedState> Needs { get; set; } = new();
 
-        [Key("skills")]
         public Dictionary<string, int> Skills { get; set; } = new();
 
-        [Key("work_priorities")]
         public Dictionary<string, int> WorkPriorities { get; set; } = new();
     }
 
@@ -83,18 +78,41 @@ namespace RimWorld.GameRL.State
             if (map == null)
                 return new List<ColonistState>();
 
-            return map.mapPawns.FreeColonists
-                .Select(p => ExtractPawn(p, map, entities))
-                .ToList();
+            // Take snapshot to avoid collection modification during iteration
+            List<Pawn> colonistSnapshot;
+            try
+            {
+                colonistSnapshot = map.mapPawns.FreeColonists.ToList();
+            }
+            catch
+            {
+                return new List<ColonistState>();
+            }
+
+            var result = new List<ColonistState>();
+            foreach (var pawn in colonistSnapshot)
+            {
+                if (pawn == null || pawn.Destroyed || !pawn.Spawned) continue;
+
+                try
+                {
+                    result.Add(ExtractPawn(pawn));
+                }
+                catch
+                {
+                    // Skip pawns that throw during extraction
+                }
+            }
+            return result;
         }
 
-        private static ColonistState ExtractPawn(Pawn pawn, Map map, EntityIndex? entities)
+        private static ColonistState ExtractPawn(Pawn pawn)
         {
-            var state = new ColonistState
+            return new ColonistState
             {
                 Id = pawn.ThingID,
                 Name = pawn.Name?.ToStringFull ?? "Unknown",
-                Position = new[] { (float)pawn.Position.x, (float)pawn.Position.z },
+                Position = new Position2D { X = pawn.Position.x, Y = pawn.Position.z },
                 Health = pawn.health?.summaryHealth?.SummaryHealthPercent ?? 1f,
                 Mood = pawn.needs?.mood?.CurLevelPercentage ?? 0.5f,
                 Hunger = 1f - (pawn.needs?.food?.CurLevelPercentage ?? 1f),
@@ -111,47 +129,65 @@ namespace RimWorld.GameRL.State
                 Skills = ExtractSkills(pawn),
                 WorkPriorities = ExtractWorkPriorities(pawn)
             };
-
-            // Compute reachability for all entities
-            if (entities != null && !pawn.Downed)
-            {
-                state.Reachable = ComputeReachable(pawn, map, entities);
-            }
-
-            return state;
         }
 
-        private static List<string> ComputeReachable(Pawn pawn, Map map, EntityIndex entities)
+        private static Dictionary<string, NeedState> ExtractNeeds(Pawn pawn)
         {
-            var reachable = new List<string>();
-
-            // Check reachability to all entities (excluding self)
-            foreach (var entityRef in EntityExtractor.GetAllEntityIds(entities))
-            {
-                if (entityRef == pawn.ThingID) continue;
-
-                var target = map.listerThings.AllThings
-                    .FirstOrDefault(t => t.ThingID == entityRef);
-
-                if (target != null && pawn.CanReach(target, PathEndMode.Touch, Danger.Deadly))
-                {
-                    reachable.Add(entityRef);
-                }
-            }
-
-            return reachable;
-        }
-
-        private static Dictionary<string, float> ExtractNeeds(Pawn pawn)
-        {
-            var needs = new Dictionary<string, float>();
+            var needs = new Dictionary<string, NeedState>();
             if (pawn.needs == null) return needs;
 
             foreach (var need in pawn.needs.AllNeeds)
             {
-                needs[need.def.defName] = need.CurLevelPercentage;
+                var value = need.CurLevelPercentage;
+                needs[need.def.defName] = new NeedState
+                {
+                    Value = value,
+                    Status = GetNeedStatus(need.def.defName, value)
+                };
             }
             return needs;
+        }
+
+        private static string GetNeedStatus(string needName, float value)
+        {
+            return needName switch
+            {
+                "Food" => value switch
+                {
+                    < 0.1f => "Starving",
+                    < 0.3f => "Hungry",
+                    < 0.8f => "Fed",
+                    _ => "Full"
+                },
+                "Rest" => value switch
+                {
+                    < 0.1f => "Exhausted",
+                    < 0.3f => "Tired",
+                    < 0.8f => "Rested",
+                    _ => "WellRested"
+                },
+                "Joy" => value switch
+                {
+                    < 0.15f => "Miserable",
+                    < 0.35f => "Bored",
+                    < 0.7f => "Content",
+                    _ => "Happy"
+                },
+                "Mood" => value switch
+                {
+                    < 0.15f => "Breaking",
+                    < 0.35f => "Stressed",
+                    < 0.65f => "Content",
+                    _ => "Happy"
+                },
+                _ => value switch
+                {
+                    < 0.25f => "Critical",
+                    < 0.5f => "Low",
+                    < 0.75f => "Moderate",
+                    _ => "Good"
+                }
+            };
         }
 
         private static Dictionary<string, int> ExtractSkills(Pawn pawn)
