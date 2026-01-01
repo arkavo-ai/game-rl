@@ -475,35 +475,45 @@ namespace RimWorld.GameRL.State
             return new Dictionary<string, object>
             {
                 ["type"] = "discrete_parameterized",
-                ["actions"] = new[]
+                ["actions"] = new object[]
                 {
-                    new {
-                        name = "set_work_priority",
-                        @params = new Dictionary<string, object>
-                        {
-                            ["colonist_id"] = new { type = "entity_id" },
-                            ["work_type"] = new { type = "string" },
-                            ["priority"] = new { type = "int", min = 0, max = 4 }
-                        }
-                    },
-                    new {
-                        name = "draft",
-                        @params = new Dictionary<string, object>
-                        {
-                            ["colonist_id"] = new { type = "entity_id" }
-                        }
-                    },
-                    new {
-                        name = "undraft",
-                        @params = new Dictionary<string, object>
-                        {
-                            ["colonist_id"] = new { type = "entity_id" }
-                        }
-                    },
-                    new {
-                        name = "wait",
-                        @params = new Dictionary<string, object>()
-                    }
+                    // Basic actions
+                    new { name = "Wait", description = "Do nothing, advance simulation", @params = new Dictionary<string, object>() },
+                    new { name = "Draft", description = "Draft a colonist for direct control", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" } } },
+                    new { name = "Undraft", description = "Undraft a colonist", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" } } },
+                    new { name = "Move", description = "Move a drafted pawn to coordinates", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["X"] = new { type = "int" }, ["Y"] = new { type = "int" } } },
+                    new { name = "MoveToEntity", description = "Move toward a target entity", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } },
+
+                    // Work management
+                    new { name = "SetWorkPriority", description = "Set work priority (0=disabled, 1=highest, 4=lowest)", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["WorkType"] = new { type = "string" }, ["Priority"] = new { type = "int", min = 0, max = 4 } } },
+                    new { name = "SetMedicalCare", description = "Set medical care level (nocare/nomeds/herbal/normal/best)", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["CareLevel"] = new { type = "string" } } },
+
+                    // Combat
+                    new { name = "Attack", description = "Force a drafted pawn to attack", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } },
+                    new { name = "DesignateHunt", description = "Mark an animal for hunting", @params = new Dictionary<string, object> { ["TargetId"] = new { type = "entity_id" } } },
+                    new { name = "CancelHunt", description = "Remove hunting designation", @params = new Dictionary<string, object> { ["TargetId"] = new { type = "entity_id" } } },
+
+                    // Items
+                    new { name = "Equip", description = "Have a pawn equip a weapon", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["WeaponId"] = new { type = "entity_id" } } },
+                    new { name = "Haul", description = "Force a pawn to haul an item", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["ItemId"] = new { type = "entity_id" } } },
+                    new { name = "Unforbid", description = "Unforbid a specific item", @params = new Dictionary<string, object> { ["ThingId"] = new { type = "entity_id" } } },
+                    new { name = "UnforbidByType", description = "Unforbid all items of a type (e.g., MealSurvivalPack)", @params = new Dictionary<string, object> { ["DefName"] = new { type = "string" } } },
+                    new { name = "UnforbidArea", description = "Unforbid all items in a radius", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Radius"] = new { type = "int" } } },
+
+                    // Production
+                    new { name = "AddBill", description = "Add a production bill to a workbench", @params = new Dictionary<string, object> { ["BuildingId"] = new { type = "entity_id" }, ["Recipe"] = new { type = "string" }, ["Count"] = new { type = "int" } } },
+                    new { name = "CancelBill", description = "Remove a bill from a workbench", @params = new Dictionary<string, object> { ["BuildingId"] = new { type = "entity_id" }, ["BillIndex"] = new { type = "int" } } },
+                    new { name = "ModifyBill", description = "Modify a bill's count or repeat mode", @params = new Dictionary<string, object> { ["BuildingId"] = new { type = "entity_id" }, ["BillIndex"] = new { type = "int" }, ["Count"] = new { type = "int", optional = true }, ["RepeatForever"] = new { type = "bool", optional = true } } },
+
+                    // Construction & Zones
+                    new { name = "PlaceBlueprint", description = "Place a building blueprint", @params = new Dictionary<string, object> { ["Building"] = new { type = "string" }, ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Rotation"] = new { type = "int", optional = true }, ["Stuff"] = new { type = "string", optional = true } } },
+                    new { name = "CreateStockpile", description = "Create a stockpile zone", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Width"] = new { type = "int" }, ["Height"] = new { type = "int" } } },
+                    new { name = "CreateGrowingZone", description = "Create a growing zone", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Width"] = new { type = "int" }, ["Height"] = new { type = "int" }, ["Plant"] = new { type = "string", optional = true } } },
+                    new { name = "DesignateMine", description = "Designate area for mining", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Radius"] = new { type = "int" } } },
+                    new { name = "DesignateCutPlants", description = "Designate plants for cutting", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Radius"] = new { type = "int" } } },
+
+                    // Social
+                    new { name = "Chat", description = "Initiate social interaction", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } }
                 }
             };
         }

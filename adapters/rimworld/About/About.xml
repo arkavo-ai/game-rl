@@ -16,7 +16,7 @@
   <loadAfter>
     <li>brrainz.harmony</li>
   </loadAfter>
-  <description>Version 0.2.1
+  <description>Version 0.2.2
 
 Enables AI agents to observe and control RimWorld colonies through the Game-RL protocol. Connect with Claude Code for natural language colony management.
 
