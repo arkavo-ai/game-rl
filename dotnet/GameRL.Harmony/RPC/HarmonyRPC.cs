@@ -192,8 +192,26 @@ namespace GameRL.Harmony.RPC
                 // Check if we have a value for this parameter
                 if (!parameters.TryGetValue(jsonKey, out var rawValue))
                 {
-                    // Use default value if available, otherwise null
-                    args[i] = param.HasDefaultValue ? param.DefaultValue : GetDefaultValue(paramType);
+                    if (param.HasDefaultValue)
+                    {
+                        // Use default value for optional parameters
+                        args[i] = param.DefaultValue;
+                        continue;
+                    }
+
+                    // Required parameter is missing - check if we have a resolver for this type
+                    // This catches cases like Draft with TargetId instead of ColonistId
+                    if (_resolvers.ContainsKey(paramType))
+                    {
+                        var msg = $"Missing required parameter '{jsonKey}' ({paramType.Name}). Check the action's parameter names.";
+                        _logError($"[HarmonyRPC] {msg}");
+                        _lastError = msg;
+                        args[i] = null;
+                        continue;
+                    }
+
+                    // Use default for non-resolvable types
+                    args[i] = GetDefaultValue(paramType);
                     continue;
                 }
 

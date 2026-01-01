@@ -15,6 +15,9 @@ namespace RimWorld.GameRL.State
     {
         public int X { get; set; }
         public int Y { get; set; }
+
+        public Position2D() { }
+        public Position2D(int x, int y) { X = x; Y = y; }
     }
 
     /// <summary>

@@ -11,6 +11,7 @@ using GameRL.Harmony;
 using GameRL.Harmony.RPC;
 using RimWorld.GameRL.Patches;
 using RimWorld.GameRL.Rewards;
+using RimWorld.GameRL.State;
 
 namespace RimWorld.GameRL.Actions
 {
@@ -55,13 +56,59 @@ namespace RimWorld.GameRL.Actions
                 return true;
             }
 
-            _agents[agentId] = new AgentInfo
+            var info = new AgentInfo
             {
                 AgentType = agentType,
                 Config = config
             };
 
-            Log.Message($"[GameRL] Agent registered: {agentId} ({agentType})");
+            // Parse ObservationMode from config
+            if (config.TryGetValue("ObservationMode", out var modeObj) && modeObj is string modeStr)
+            {
+                info.ObservationMode = modeStr.ToLowerInvariant() switch
+                {
+                    "minimal" => ObservationMode.Minimal,
+                    "normal" => ObservationMode.Normal,
+                    "full" => ObservationMode.Full,
+                    _ => ObservationMode.Minimal
+                };
+            }
+
+            // Parse DeltaConfig from config
+            if (config.TryGetValue("DeltaConfig", out var deltaObj) && deltaObj is Dictionary<string, object> deltaDict)
+            {
+                var deltaConfig = info.ObservationMode == ObservationMode.Minimal
+                    ? DeltaConfig.Minimal
+                    : DeltaConfig.Normal;
+
+                if (deltaDict.TryGetValue("MoodThreshold", out var mood))
+                    deltaConfig.MoodThreshold = Convert.ToSingle(mood);
+                if (deltaDict.TryGetValue("HealthThreshold", out var health))
+                    deltaConfig.HealthThreshold = Convert.ToSingle(health);
+                if (deltaDict.TryGetValue("HungerThreshold", out var hunger))
+                    deltaConfig.HungerThreshold = Convert.ToSingle(hunger);
+                if (deltaDict.TryGetValue("RestThreshold", out var rest))
+                    deltaConfig.RestThreshold = Convert.ToSingle(rest);
+                if (deltaDict.TryGetValue("PositionThreshold", out var pos))
+                    deltaConfig.PositionThreshold = Convert.ToInt32(pos);
+                if (deltaDict.TryGetValue("PositionOnlyOnJobChange", out var posJob))
+                    deltaConfig.PositionOnlyOnJobChange = Convert.ToBoolean(posJob);
+                if (deltaDict.TryGetValue("ResourcePercentThreshold", out var res))
+                    deltaConfig.ResourcePercentThreshold = Convert.ToSingle(res);
+
+                info.DeltaConfig = deltaConfig;
+            }
+            else
+            {
+                // Set default based on observation mode
+                info.DeltaConfig = info.ObservationMode == ObservationMode.Minimal
+                    ? DeltaConfig.Minimal
+                    : DeltaConfig.Normal;
+            }
+
+            _agents[agentId] = info;
+
+            Log.Message($"[GameRL] Agent registered: {agentId} ({agentType}, mode={info.ObservationMode})");
             return true;
         }
 
@@ -127,6 +174,7 @@ namespace RimWorld.GameRL.Actions
 
             _episodeStartTick = Find.TickManager?.TicksGame ?? 0;
             _rewardCalculator.Reset();
+            ResetAgentStates();  // Reset first observation flag for all agents
 
             Log.Message($"[GameRL] Reset (seed: {seed}, scenario: {scenario})");
 
@@ -168,6 +216,76 @@ namespace RimWorld.GameRL.Actions
         {
             public string AgentType { get; set; } = "";
             public Dictionary<string, object> Config { get; set; } = new();
+            public ObservationMode ObservationMode { get; set; } = ObservationMode.Minimal;
+            public bool FirstObservation { get; set; } = true;
+            public string? LastStateHash { get; set; }
+            public DeltaConfig DeltaConfig { get; set; } = DeltaConfig.Minimal;
+        }
+
+        /// <summary>
+        /// Gets observation mode for an agent
+        /// </summary>
+        public ObservationMode GetObservationMode(string agentId)
+        {
+            return _agents.TryGetValue(agentId, out var info) ? info.ObservationMode : ObservationMode.Minimal;
+        }
+
+        /// <summary>
+        /// Checks if this is the agent's first observation (requires full state)
+        /// </summary>
+        public bool IsFirstObservation(string agentId)
+        {
+            return _agents.TryGetValue(agentId, out var info) ? info.FirstObservation : true;
+        }
+
+        /// <summary>
+        /// Marks first observation as sent for an agent
+        /// </summary>
+        public void MarkFirstObservationSent(string agentId)
+        {
+            if (_agents.TryGetValue(agentId, out var info))
+            {
+                info.FirstObservation = false;
+            }
+        }
+
+        /// <summary>
+        /// Gets the last state hash for an agent
+        /// </summary>
+        public string? GetLastStateHash(string agentId)
+        {
+            return _agents.TryGetValue(agentId, out var info) ? info.LastStateHash : null;
+        }
+
+        /// <summary>
+        /// Updates the last state hash for an agent
+        /// </summary>
+        public void SetLastStateHash(string agentId, string hash)
+        {
+            if (_agents.TryGetValue(agentId, out var info))
+            {
+                info.LastStateHash = hash;
+            }
+        }
+
+        /// <summary>
+        /// Gets delta config for an agent
+        /// </summary>
+        public DeltaConfig GetDeltaConfig(string agentId)
+        {
+            return _agents.TryGetValue(agentId, out var info) ? info.DeltaConfig : DeltaConfig.Minimal;
+        }
+
+        /// <summary>
+        /// Resets first observation flag for all agents (called on Reset)
+        /// </summary>
+        public void ResetAgentStates()
+        {
+            foreach (var agent in _agents.Values)
+            {
+                agent.FirstObservation = true;
+                agent.LastStateHash = null;
+            }
         }
     }
 }

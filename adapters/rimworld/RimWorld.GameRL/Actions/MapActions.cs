@@ -5,6 +5,7 @@ using System.Linq;
 using GameRL.Harmony.RPC;
 using Verse;
 using RimWorld;
+using RimWorld.GameRL.State;
 
 namespace RimWorld.GameRL.Actions
 {
@@ -677,6 +678,25 @@ namespace RimWorld.GameRL.Actions
             else
             {
                 Log.Warning($"[GameRL] ModifyBill: Bill {billIndex} is not a production bill and cannot be modified.");
+            }
+        }
+
+        /// <summary>
+        /// Request a full state observation instead of delta on the next sim_step.
+        /// Use this if you lost sync (StateHash doesn't match) or want to refresh your view.
+        /// </summary>
+        [GameRLAction("RequestFullState", Description = "Request full state observation on next sim_step")]
+        public static void RequestFullState()
+        {
+            var extractor = GameRLMod.StateExtractor;
+            if (extractor != null)
+            {
+                extractor.ForceFullState = true;
+                Log.Message("[GameRL] RequestFullState: Next observation will be full state");
+            }
+            else
+            {
+                Log.Warning("[GameRL] RequestFullState: State extractor not initialized");
             }
         }
     }

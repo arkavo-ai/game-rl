@@ -30,6 +30,11 @@ namespace RimWorld.GameRL
         /// </summary>
         public static RimWorldStateExtractor? StateExtractor => _stateExtractor;
 
+        /// <summary>
+        /// Public accessor for command executor (used for agent configuration)
+        /// </summary>
+        public static RimWorldCommandExecutor? CommandExecutor => _commandExecutor;
+
         // Step tracking
         private static ulong _currentStepId;
         private static string? _currentAgentId;
@@ -233,23 +238,24 @@ namespace RimWorld.GameRL
                 // Track episode start for observations
                 _stateExtractor!.EpisodeStartTick = Find.TickManager?.TicksGame ?? 0;
 
+                // Reset always returns full observation (first observation after reset)
                 object observation;
                 if (_agents.Count == 0)
                 {
-                    observation = _stateExtractor!.ExtractObservation("default");
+                    observation = ExtractObservationForAgent("default");
                 }
                 else if (_agents.Count == 1)
                 {
                     var enumerator = _agents.Keys.GetEnumerator();
                     enumerator.MoveNext();
-                    observation = _stateExtractor!.ExtractObservation(enumerator.Current);
+                    observation = ExtractObservationForAgent(enumerator.Current);
                 }
                 else
                 {
                     var observations = new Dictionary<string, object>();
                     foreach (var agentId in _agents.Keys)
                     {
-                        observations[agentId] = _stateExtractor!.ExtractObservation(agentId);
+                        observations[agentId] = ExtractObservationForAgent(agentId);
                     }
                     observation = observations;
                 }
@@ -383,12 +389,12 @@ namespace RimWorld.GameRL
 
                 if (_agents.Count <= 1)
                 {
-                    var observation = _stateExtractor!.ExtractObservation(_currentAgentId);
-                    var rewardComponents = _commandExecutor.ComputeReward(_currentAgentId);
-                    var totalReward = _commandExecutor.GetTotalReward(_currentAgentId);
+                    var observation = ExtractObservationForAgent(_currentAgentId ?? "default");
+                    var rewardComponents = _commandExecutor.ComputeReward(_currentAgentId ?? "default");
+                    var totalReward = _commandExecutor.GetTotalReward(_currentAgentId ?? "default");
 
                     _bridge?.SendStepResult(
-                        _currentAgentId,
+                        _currentAgentId ?? "default",
                         observation,
                         totalReward,
                         rewardComponents,
@@ -401,7 +407,7 @@ namespace RimWorld.GameRL
                 var results = new List<StepResultMessage>();
                 foreach (var agentId in _agents.Keys)
                 {
-                    var observation = _stateExtractor!.ExtractObservation(agentId);
+                    var observation = ExtractObservationForAgent(agentId);
                     var rewardComponents = _commandExecutor.ComputeReward(agentId);
                     var totalReward = _commandExecutor.GetTotalReward(agentId);
 
@@ -432,6 +438,44 @@ namespace RimWorld.GameRL
         private class AgentState
         {
             public string AgentType { get; set; } = "";
+        }
+
+        /// <summary>
+        /// Extract observation for an agent using its configured observation mode.
+        /// Uses delta observations when appropriate.
+        /// </summary>
+        private static object ExtractObservationForAgent(string agentId)
+        {
+            var mode = _commandExecutor?.GetObservationMode(agentId) ?? ObservationMode.Minimal;
+            var isFirst = _commandExecutor?.IsFirstObservation(agentId) ?? true;
+            var previousHash = _commandExecutor?.GetLastStateHash(agentId);
+            var config = _commandExecutor?.GetDeltaConfig(agentId) ?? DeltaConfig.Minimal;
+
+            var obs = _stateExtractor!.ExtractForAgent(agentId, mode, isFirst, previousHash, config);
+
+            // Update state tracking after extraction
+            if (isFirst)
+            {
+                _commandExecutor?.MarkFirstObservationSent(agentId);
+            }
+
+            // Get state hash from the observation and update the executor
+            string? stateHash = null;
+            if (obs is RimWorldObservation fullObs)
+            {
+                stateHash = _stateExtractor.ComputeStateHash();
+            }
+            else if (obs is DeltaObservation deltaObs)
+            {
+                stateHash = deltaObs.StateHash;
+            }
+
+            if (stateHash != null)
+            {
+                _commandExecutor?.SetLastStateHash(agentId, stateHash);
+            }
+
+            return obs;
         }
 
         private static VisionStreamManager GetOrCreateVisionStream(string profile)

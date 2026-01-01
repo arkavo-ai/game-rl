@@ -1,13 +1,35 @@
 {
   "name": "RimWorld",
   "version": "1.6",
-  "game_rl_version": "0.3.0",
+  "game_rl_version": "0.4.0",
   "capabilities": {
     "multi_agent": true,
     "max_agents": 8,
     "deterministic": true,
     "headless": false,
-    "save_replay": true
+    "save_replay": true,
+    "delta_observations": true
+  },
+  "agent_config": {
+    "ObservationMode": {
+      "type": "string",
+      "enum": ["minimal", "normal", "full"],
+      "default": "minimal",
+      "description": "minimal (~1-3KB deltas), normal (~10-20KB), full (~35-150KB per step)"
+    },
+    "DeltaConfig": {
+      "type": "object",
+      "description": "Optional thresholds for delta reporting",
+      "properties": {
+        "MoodThreshold": {"type": "float", "default": 0.10, "description": "Report mood changes >= this (0-1)"},
+        "HealthThreshold": {"type": "float", "default": 0.10},
+        "HungerThreshold": {"type": "float", "default": 0.10},
+        "RestThreshold": {"type": "float", "default": 0.10},
+        "PositionThreshold": {"type": "int", "default": 5, "description": "Tiles moved before reporting"},
+        "PositionOnlyOnJobChange": {"type": "bool", "default": true},
+        "ResourcePercentThreshold": {"type": "float", "default": 0.05, "description": "0 = any change"}
+      }
+    }
   },
   "agent_types": [
     "colony_manager",
@@ -178,10 +200,16 @@
           "Y": {"type": "int"},
           "Radius": {"type": "int", "default": 10}
         }
+      },
+      {
+        "name": "RequestFullState",
+        "description": "Request full state observation on next sim_step (use if StateHash mismatch)",
+        "params": {}
       }
     ]
   },
   "observation_space": {
+    "description": "Full observation (first step or mode=full)",
     "type": "dict",
     "spaces": {
       "Tick": {"type": "int", "description": "Current game tick"},
@@ -199,6 +227,31 @@
       "IdleColonists": {"type": "int"},
       "LastAction": {"type": "dict", "optional": true, "description": "Feedback from last action"},
       "Episode": {"type": "dict", "description": "Episode progress info"}
+    }
+  },
+  "delta_observation_space": {
+    "description": "Delta observation (mode=minimal or mode=normal after first step)",
+    "type": "dict",
+    "spaces": {
+      "Tick": {"type": "int"},
+      "Hour": {"type": "int"},
+      "StateHash": {"type": "string", "description": "Hash of current full state"},
+      "PreviousHash": {"type": "string", "description": "Hash this delta is based on - validate matches your last StateHash"},
+      "LastAction": {"type": "dict", "optional": true},
+      "Alerts": {"type": "sequence"},
+      "Events": {"type": "sequence", "description": "GameEvents explaining why state changed"},
+      "Delta": {
+        "type": "dict",
+        "spaces": {
+          "Colonists": {"type": "sequence", "description": "ColonistDelta objects with only changed fields"},
+          "RemovedColonists": {"type": "sequence", "description": "IDs of colonists that died or left"},
+          "Resources": {"type": "dict", "description": "Only changed resource counts"},
+          "AddedThreats": {"type": "sequence"},
+          "RemovedThreats": {"type": "sequence"},
+          "AddedEntities": {"type": "sequence"},
+          "RemovedEntities": {"type": "sequence"}
+        }
+      }
     }
   },
   "reward_components": [
