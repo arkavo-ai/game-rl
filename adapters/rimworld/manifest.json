@@ -1,7 +1,7 @@
 {
   "name": "RimWorld",
-  "version": "1.5",
-  "game_rl_version": "1.0.0",
+  "version": "1.6",
+  "game_rl_version": "0.2.0",
   "capabilities": {
     "multi_agent": true,
     "max_agents": 8,
