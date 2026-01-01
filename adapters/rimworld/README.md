@@ -31,6 +31,7 @@ Copy the mod folder to your RimWorld Mods directory:
 
 **macOS (Steam Workshop):**
 ```bash
+mkdir -p ~/arkavo-rimworld && cd ~/arkavo-rimworld
 claude mcp add game-rl -- "$HOME/Library/Application Support/Steam/steamapps/workshop/content/294100/3634065510/bin/macos/harmony-server" /tmp/gamerl-rimworld.sock
 ```
 
