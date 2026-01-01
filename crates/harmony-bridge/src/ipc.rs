@@ -93,9 +93,9 @@ impl HarmonyBridge {
 
         #[cfg(not(unix))]
         {
-            return Err(GameRLError::IpcError(
+            Err(GameRLError::IpcError(
                 "Only Unix sockets are supported (Windows named pipes not yet implemented)".into(),
-            ));
+            ))
         }
 
         #[cfg(unix)]
