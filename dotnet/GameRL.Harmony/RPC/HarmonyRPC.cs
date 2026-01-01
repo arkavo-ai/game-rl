@@ -24,6 +24,18 @@ namespace GameRL.Harmony.RPC
     }
 
     /// <summary>
+    /// Result of dispatching an action
+    /// </summary>
+    public class DispatchResult
+    {
+        public bool Success { get; set; }
+        public string? ErrorMessage { get; set; }
+
+        public static DispatchResult Ok() => new DispatchResult { Success = true };
+        public static DispatchResult Fail(string message) => new DispatchResult { Success = false, ErrorMessage = message };
+    }
+
+    /// <summary>
     /// Reflection-based RPC dispatcher that auto-discovers [GameRLAction] methods
     /// </summary>
     public class HarmonyRPC
@@ -32,6 +44,7 @@ namespace GameRL.Harmony.RPC
         private readonly Dictionary<Type, ITypeResolver> _resolvers = new();
         private readonly Action<string> _log;
         private readonly Action<string> _logError;
+        private string? _lastError;
 
         /// <summary>
         /// Information about a registered action
@@ -115,31 +128,52 @@ namespace GameRL.Harmony.RPC
         /// <summary>
         /// Dispatch an action by name with the given parameters
         /// </summary>
-        /// <returns>True if action was found and executed, false otherwise</returns>
-        public bool Dispatch(string actionName, Dictionary<string, object>? parameters)
+        /// <returns>DispatchResult with success status and any error message</returns>
+        public DispatchResult Dispatch(string actionName, Dictionary<string, object>? parameters)
         {
+            _lastError = null;
+
             if (!_actions.TryGetValue(actionName, out var actionInfo))
             {
-                _logError($"[HarmonyRPC] Unknown action: {actionName}");
-                return false;
+                var available = string.Join(", ", _actions.Keys.OrderBy(k => k));
+                var msg = $"Unknown action '{actionName}'. Available: {available}";
+                _logError($"[HarmonyRPC] {msg}");
+                return DispatchResult.Fail(msg);
             }
 
             try
             {
                 var args = BindParameters(actionInfo, parameters ?? new Dictionary<string, object>());
                 actionInfo.Method.Invoke(null, args);
-                return true;
+
+                // Check if there was an error logged during parameter binding
+                if (_lastError != null)
+                {
+                    return DispatchResult.Fail(_lastError);
+                }
+
+                return DispatchResult.Ok();
             }
             catch (TargetInvocationException ex)
             {
-                _logError($"[HarmonyRPC] Action '{actionName}' threw exception: {ex.InnerException?.Message ?? ex.Message}");
-                return false;
+                var msg = $"Action '{actionName}' threw exception: {ex.InnerException?.Message ?? ex.Message}";
+                _logError($"[HarmonyRPC] {msg}");
+                return DispatchResult.Fail(msg);
             }
             catch (Exception ex)
             {
-                _logError($"[HarmonyRPC] Failed to dispatch '{actionName}': {ex.Message}");
-                return false;
+                var msg = $"Failed to dispatch '{actionName}': {ex.Message}";
+                _logError($"[HarmonyRPC] {msg}");
+                return DispatchResult.Fail(msg);
             }
+        }
+
+        /// <summary>
+        /// Dispatch an action by name with the given parameters (legacy bool version)
+        /// </summary>
+        public bool DispatchBool(string actionName, Dictionary<string, object>? parameters)
+        {
+            return Dispatch(actionName, parameters).Success;
         }
 
         private object?[] BindParameters(ActionInfo actionInfo, Dictionary<string, object> parameters)
@@ -167,7 +201,14 @@ namespace GameRL.Harmony.RPC
                 var needsResolve = param.GetCustomAttribute<ResolveAttribute>() != null;
                 if (needsResolve && rawValue is string stringId && _resolvers.TryGetValue(paramType, out var resolver))
                 {
-                    args[i] = resolver.Resolve(stringId);
+                    var resolved = resolver.Resolve(stringId);
+                    if (resolved == null)
+                    {
+                        var msg = $"Failed to resolve {paramType.Name} for '{jsonKey}': '{stringId}' not found. Check Entities in observation for valid IDs.";
+                        _logError($"[HarmonyRPC] {msg}");
+                        _lastError = msg;
+                    }
+                    args[i] = resolved;
                     continue;
                 }
 
@@ -175,7 +216,14 @@ namespace GameRL.Harmony.RPC
                 // (allows implicit resolution for known types like Pawn)
                 if (rawValue is string id && _resolvers.TryGetValue(paramType, out var implicitResolver))
                 {
-                    args[i] = implicitResolver.Resolve(id);
+                    var resolved = implicitResolver.Resolve(id);
+                    if (resolved == null)
+                    {
+                        var msg = $"Failed to resolve {paramType.Name} for '{jsonKey}': '{id}' not found. Check Entities in observation for valid IDs.";
+                        _logError($"[HarmonyRPC] {msg}");
+                        _lastError = msg;
+                    }
+                    args[i] = resolved;
                     continue;
                 }
 

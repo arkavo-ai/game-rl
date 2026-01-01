@@ -101,20 +101,21 @@ namespace RimWorld.GameRL.Actions
                 return;
             }
 
-            // Check if action exists
-            if (!_rpc.HasAction(actionType!))
-            {
-                LastActionResult = ActionResult.Fail(actionType!, ActionErrorCode.UnknownAction,
-                    $"Unknown action: {actionType}");
-                Log.Warning($"[GameRL] Unknown action: {actionType}");
-                return;
-            }
-
             // Dispatch via HarmonyRPC - automatic method resolution and parameter binding
-            var success = _rpc.Dispatch(actionType!, actionParams);
-            LastActionResult = success
-                ? ActionResult.Ok(actionType!, "Action executed")
-                : ActionResult.Fail(actionType!, ActionErrorCode.InternalError, "Action dispatch failed");
+            var result = _rpc.Dispatch(actionType!, actionParams);
+            if (result.Success)
+            {
+                LastActionResult = ActionResult.Ok(actionType!, "Action executed successfully");
+            }
+            else
+            {
+                // Determine error code based on message
+                var errorCode = result.ErrorMessage?.Contains("Unknown action") == true
+                    ? ActionErrorCode.UnknownAction
+                    : ActionErrorCode.InternalError;
+                LastActionResult = ActionResult.Fail(actionType!, errorCode, result.ErrorMessage ?? "Action failed");
+                Log.Warning($"[GameRL] {result.ErrorMessage}");
+            }
         }
 
         public void Reset(ulong? seed, string? scenario)

@@ -22,33 +22,33 @@ namespace RimWorld.GameRL.Actions
         {
             if (target == null)
             {
-                Log.Warning("[GameRL] designate_hunt: Target not found");
+                Log.Warning("[GameRL] DesignateHunt: TargetId not found. Use a ThingID from Entities.Animals (e.g., 'Deer123')");
                 return;
             }
 
             var pawn = target as Pawn;
             if (pawn == null || !pawn.RaceProps.Animal)
             {
-                Log.Warning($"[GameRL] designate_hunt: {target.ThingID} is not an animal");
+                Log.Warning($"[GameRL] DesignateHunt: {target.LabelShort} ({target.ThingID}) is not an animal. Only animals can be hunted.");
                 return;
             }
 
             var map = target.Map;
             if (map == null)
             {
-                Log.Warning("[GameRL] designate_hunt: Target has no map");
+                Log.Warning($"[GameRL] DesignateHunt: {target.LabelShort} ({target.ThingID}) is not on the map");
                 return;
             }
 
             // Check if already designated
             if (map.designationManager.DesignationOn(target, DesignationDefOf.Hunt) != null)
             {
-                Log.Message($"[GameRL] designate_hunt: {target.LabelShort} already designated for hunting");
+                Log.Message($"[GameRL] DesignateHunt: {target.LabelShort} ({target.ThingID}) is already designated for hunting");
                 return;
             }
 
             map.designationManager.AddDesignation(new Designation(target, DesignationDefOf.Hunt));
-            Log.Message($"[GameRL] designate_hunt: Marked {target.LabelShort} for hunting");
+            Log.Message($"[GameRL] DesignateHunt: Marked {target.LabelShort} for hunting");
         }
 
         /// <summary>
@@ -59,18 +59,26 @@ namespace RimWorld.GameRL.Actions
         {
             if (target == null)
             {
-                Log.Warning("[GameRL] cancel_hunt: Target not found");
+                Log.Warning("[GameRL] CancelHunt: TargetId not found. Use a ThingID from Entities.Animals");
                 return;
             }
 
             var map = target.Map;
-            if (map == null) return;
+            if (map == null)
+            {
+                Log.Warning($"[GameRL] CancelHunt: {target.LabelShort} ({target.ThingID}) is not on the map");
+                return;
+            }
 
             var designation = map.designationManager.DesignationOn(target, DesignationDefOf.Hunt);
             if (designation != null)
             {
                 map.designationManager.RemoveDesignation(designation);
-                Log.Message($"[GameRL] cancel_hunt: Removed hunt designation from {target.LabelShort}");
+                Log.Message($"[GameRL] CancelHunt: Removed hunt designation from {target.LabelShort}");
+            }
+            else
+            {
+                Log.Warning($"[GameRL] CancelHunt: {target.LabelShort} ({target.ThingID}) is not designated for hunting");
             }
         }
 
@@ -87,21 +95,21 @@ namespace RimWorld.GameRL.Actions
         {
             if (string.IsNullOrEmpty(buildingDefName))
             {
-                Log.Warning("[GameRL] place_blueprint: Building parameter is required (e.g., Bed, ButcherSpot, Campfire)");
+                Log.Warning("[GameRL] PlaceBlueprint: Building parameter is required. Examples: Bed, ButcherSpot, Campfire, CookStove, ResearchBench, Table2x2c, DiningChair, StandingLamp");
                 return;
             }
 
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] place_blueprint: No current map");
+                Log.Warning("[GameRL] PlaceBlueprint: No map is currently loaded");
                 return;
             }
 
             var buildingDef = DefDatabase<ThingDef>.GetNamed(buildingDefName, errorOnFail: false);
             if (buildingDef == null)
             {
-                Log.Warning($"[GameRL] place_blueprint: Unknown building: {buildingDefName}");
+                Log.Warning($"[GameRL] PlaceBlueprint: Unknown building '{buildingDefName}'. Examples: Bed, ButcherSpot, Campfire, CookStove, ResearchBench, Sandbags, Wall, Door");
                 return;
             }
 
@@ -123,14 +131,15 @@ namespace RimWorld.GameRL.Actions
             // Check if position is valid
             if (!pos.InBounds(map))
             {
-                Log.Warning($"[GameRL] place_blueprint: Position {pos} out of bounds");
+                Log.Warning($"[GameRL] PlaceBlueprint: Position ({x},{z}) is out of map bounds. Map size is {map.Size.x}x{map.Size.z}");
                 return;
             }
 
             // Check if can place
-            if (!GenConstruct.CanPlaceBlueprintAt(buildingDef, pos, rot, map, false, null, null, stuffDef).Accepted)
+            var canPlace = GenConstruct.CanPlaceBlueprintAt(buildingDef, pos, rot, map, false, null, null, stuffDef);
+            if (!canPlace.Accepted)
             {
-                Log.Warning($"[GameRL] place_blueprint: Cannot place {buildingDefName} at {pos}");
+                Log.Warning($"[GameRL] PlaceBlueprint: Cannot place {buildingDefName} at ({x},{z}). Reason: {canPlace.Reason ?? "blocked or invalid terrain"}");
                 return;
             }
 
@@ -144,13 +153,13 @@ namespace RimWorld.GameRL.Actions
                 var building = ThingMaker.MakeThing(buildingDef, stuffDef);
                 building.SetFaction(Faction.OfPlayer);
                 GenSpawn.Spawn(building, pos, map, rot);
-                Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} instantly at {pos}");
+                Log.Message($"[GameRL] PlaceBlueprint: Placed {buildingDefName} instantly at ({x},{z}) - no construction needed");
             }
             else
             {
                 // Normal construction - create blueprint
                 GenConstruct.PlaceBlueprintForBuild(buildingDef, pos, map, rot, Faction.OfPlayer, stuffDef);
-                Log.Message($"[GameRL] place_blueprint: Placed {buildingDefName} blueprint at {pos}");
+                Log.Message($"[GameRL] PlaceBlueprint: Placed {buildingDefName} blueprint at ({x},{z}) - colonists will construct when resources available");
             }
         }
 
@@ -168,7 +177,7 @@ namespace RimWorld.GameRL.Actions
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] create_growing_zone: No current map");
+                Log.Warning("[GameRL] CreateGrowingZone: No map is currently loaded");
                 return;
             }
 
@@ -187,7 +196,7 @@ namespace RimWorld.GameRL.Actions
 
             if (cells.Count == 0)
             {
-                Log.Warning($"[GameRL] create_growing_zone: No fertile cells at ({x},{z}) {width}x{height}");
+                Log.Warning($"[GameRL] CreateGrowingZone: No fertile cells at ({x},{z}) with size {width}x{height}. Growing zones require fertile soil.");
                 return;
             }
 
@@ -206,16 +215,16 @@ namespace RimWorld.GameRL.Actions
                 if (plantDef != null)
                 {
                     zone.SetPlantDefToGrow(plantDef);
-                    Log.Message($"[GameRL] create_growing_zone: Created {cells.Count} cell zone for {plantDefName}");
+                    Log.Message($"[GameRL] CreateGrowingZone: Created {cells.Count} cell zone for {plantDefName} at ({x},{z})");
                 }
                 else
                 {
-                    Log.Warning($"[GameRL] create_growing_zone: Unknown plant: {plantDefName}");
+                    Log.Warning($"[GameRL] CreateGrowingZone: Unknown plant '{plantDefName}'. Examples: Plant_Potato, Plant_Rice, Plant_Corn, Plant_Healroot, Plant_Cotton");
                 }
             }
             else
             {
-                Log.Message($"[GameRL] create_growing_zone: Created {cells.Count} cell zone");
+                Log.Message($"[GameRL] CreateGrowingZone: Created {cells.Count} cell zone at ({x},{z})");
             }
         }
 
@@ -232,7 +241,7 @@ namespace RimWorld.GameRL.Actions
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] create_stockpile: No current map");
+                Log.Warning("[GameRL] CreateStockpile: No map is currently loaded");
                 return;
             }
 
@@ -251,7 +260,7 @@ namespace RimWorld.GameRL.Actions
 
             if (cells.Count == 0)
             {
-                Log.Warning($"[GameRL] create_stockpile: No valid cells at ({x},{z}) {width}x{height}");
+                Log.Warning($"[GameRL] CreateStockpile: No valid cells at ({x},{z}) with size {width}x{height}. Stockpiles need standable terrain (not walls, water, or impassable).");
                 return;
             }
 
@@ -263,7 +272,7 @@ namespace RimWorld.GameRL.Actions
                 zone.AddCell(cell);
             }
 
-            Log.Message($"[GameRL] create_stockpile: Created {cells.Count} cell stockpile");
+            Log.Message($"[GameRL] CreateStockpile: Created {cells.Count} cell stockpile at ({x},{z})");
         }
 
         /// <summary>
@@ -278,7 +287,7 @@ namespace RimWorld.GameRL.Actions
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] designate_cut_plants: No current map");
+                Log.Warning("[GameRL] DesignateCutPlants: No map is currently loaded");
                 return;
             }
 
@@ -300,7 +309,14 @@ namespace RimWorld.GameRL.Actions
                 }
             }
 
-            Log.Message($"[GameRL] designate_cut_plants: Marked {count} trees for cutting around ({x},{z})");
+            if (count > 0)
+            {
+                Log.Message($"[GameRL] DesignateCutPlants: Marked {count} trees for cutting in radius {radius} around ({x},{z})");
+            }
+            else
+            {
+                Log.Warning($"[GameRL] DesignateCutPlants: No trees found in radius {radius} around ({x},{z})");
+            }
         }
 
         /// <summary>
@@ -315,7 +331,7 @@ namespace RimWorld.GameRL.Actions
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] designate_mine: No current map");
+                Log.Warning("[GameRL] DesignateMine: No map is currently loaded");
                 return;
             }
 
@@ -337,7 +353,14 @@ namespace RimWorld.GameRL.Actions
                 }
             }
 
-            Log.Message($"[GameRL] designate_mine: Marked {count} cells for mining around ({x},{z})");
+            if (count > 0)
+            {
+                Log.Message($"[GameRL] DesignateMine: Marked {count} cells for mining in radius {radius} around ({x},{z})");
+            }
+            else
+            {
+                Log.Warning($"[GameRL] DesignateMine: No mineable rocks found in radius {radius} around ({x},{z})");
+            }
         }
 
         /// <summary>
@@ -351,34 +374,37 @@ namespace RimWorld.GameRL.Actions
         {
             if (building == null)
             {
-                Log.Warning("[GameRL] add_bill: Building not found");
+                Log.Warning("[GameRL] AddBill: BuildingId not found. Use a ThingID from Entities.Buildings for workbenches like ButcherSpot, CookStove, etc.");
                 return;
             }
 
             if (string.IsNullOrEmpty(recipeDefName))
             {
-                Log.Warning("[GameRL] add_bill: Recipe is required (e.g., ButcherCorpseFlesh, Make_MealSimple)");
+                Log.Warning("[GameRL] AddBill: Recipe is required. Examples: ButcherCorpseFlesh, Make_MealSimple, Make_MealFine, Make_Pemmican");
                 return;
             }
 
             var billGiver = building as IBillGiver;
             if (billGiver == null)
             {
-                Log.Warning($"[GameRL] add_bill: {building.ThingID} cannot accept bills");
+                Log.Warning($"[GameRL] AddBill: {building.LabelShort} ({building.ThingID}) cannot accept bills. Use ListWorkbenches to find valid workbenches.");
                 return;
             }
 
             var recipeDef = DefDatabase<RecipeDef>.GetNamed(recipeDefName, errorOnFail: false);
             if (recipeDef == null)
             {
-                Log.Warning($"[GameRL] add_bill: Unknown recipe: {recipeDefName}");
+                // List available recipes for this workbench
+                var available = building.def.AllRecipes?.Take(5).Select(r => r.defName) ?? Enumerable.Empty<string>();
+                Log.Warning($"[GameRL] AddBill: Unknown recipe '{recipeDefName}'. Available at {building.LabelShort}: {string.Join(", ", available)}");
                 return;
             }
 
             // Check if recipe can be done at this building
             if (!recipeDef.AvailableOnNow(building, null))
             {
-                Log.Warning($"[GameRL] add_bill: Recipe {recipeDefName} not available at {building.LabelShort}");
+                var available = building.def.AllRecipes?.Take(5).Select(r => r.defName) ?? Enumerable.Empty<string>();
+                Log.Warning($"[GameRL] AddBill: Recipe '{recipeDefName}' not available at {building.LabelShort}. Available: {string.Join(", ", available)}");
                 return;
             }
 
@@ -397,7 +423,8 @@ namespace RimWorld.GameRL.Actions
             }
 
             billGiver.BillStack.AddBill(bill);
-            Log.Message($"[GameRL] add_bill: Added {recipeDefName} to {building.LabelShort}");
+            var countDesc = count > 0 ? $"x{count}" : "forever";
+            Log.Message($"[GameRL] AddBill: Added {recipeDefName} ({countDesc}) to {building.LabelShort}");
         }
 
         /// <summary>
@@ -407,7 +434,11 @@ namespace RimWorld.GameRL.Actions
         public static string ListWorkbenches()
         {
             var map = Find.CurrentMap;
-            if (map == null) return "No map";
+            if (map == null)
+            {
+                Log.Warning("[GameRL] ListWorkbenches: No map is currently loaded");
+                return "No map loaded";
+            }
 
             var result = new System.Text.StringBuilder();
             var workbenches = map.listerBuildings.allBuildingsColonist
@@ -422,7 +453,14 @@ namespace RimWorld.GameRL.Actions
                 result.AppendLine($"  Recipes: {string.Join(", ", recipes.Take(5))}...");
             }
 
-            Log.Message($"[GameRL] list_workbenches: Found {workbenches.Count} workbenches");
+            if (workbenches.Count == 0)
+            {
+                Log.Warning("[GameRL] ListWorkbenches: No workbenches found. Build a ButcherSpot, CookStove, or other production building first.");
+            }
+            else
+            {
+                Log.Message($"[GameRL] ListWorkbenches: Found {workbenches.Count} workbenches");
+            }
             return result.ToString();
         }
 
@@ -434,7 +472,7 @@ namespace RimWorld.GameRL.Actions
         {
             if (thing == null)
             {
-                Log.Warning("[GameRL] unforbid: Thing not found");
+                Log.Warning("[GameRL] Unforbid: ThingId not found. Use a ThingID from ForbiddenItems in Resources or from Entities.Items");
                 return;
             }
 
@@ -442,12 +480,12 @@ namespace RimWorld.GameRL.Actions
             // This works for items, corpses, and anything that can be forbidden
             if (!thing.def.HasComp(typeof(CompForbiddable)) && thing.def.category != ThingCategory.Item)
             {
-                Log.Warning($"[GameRL] unforbid: {thing.ThingID} cannot be forbidden/unforbidden");
+                Log.Warning($"[GameRL] Unforbid: {thing.LabelShort} ({thing.ThingID}) cannot be forbidden/unforbidden");
                 return;
             }
 
             thing.SetForbidden(false, false);
-            Log.Message($"[GameRL] unforbid: Unforbid {thing.LabelShort}");
+            Log.Message($"[GameRL] Unforbid: Unforbid {thing.LabelShort} ({thing.ThingID})");
         }
 
         /// <summary>
@@ -462,7 +500,7 @@ namespace RimWorld.GameRL.Actions
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] unforbid_area: No current map");
+                Log.Warning("[GameRL] UnforbidArea: No map is currently loaded");
                 return;
             }
 
@@ -484,7 +522,14 @@ namespace RimWorld.GameRL.Actions
                 }
             }
 
-            Log.Message($"[GameRL] unforbid_area: Unforbid {count} items around ({x},{z})");
+            if (count > 0)
+            {
+                Log.Message($"[GameRL] UnforbidArea: Unforbid {count} items in radius {radius} around ({x},{z})");
+            }
+            else
+            {
+                Log.Warning($"[GameRL] UnforbidArea: No forbidden items found in radius {radius} around ({x},{z})");
+            }
         }
 
         /// <summary>
@@ -495,21 +540,21 @@ namespace RimWorld.GameRL.Actions
         {
             if (string.IsNullOrEmpty(defName))
             {
-                Log.Warning("[GameRL] unforbid_by_type: DefName is required (e.g., MealSurvivalPack, Steel, WoodLog)");
+                Log.Warning("[GameRL] UnforbidByType: DefName is required. Examples: MealSurvivalPack, Steel, WoodLog, InsectJelly, MedicineHerbal");
                 return;
             }
 
             var map = Find.CurrentMap;
             if (map == null)
             {
-                Log.Warning("[GameRL] unforbid_by_type: No current map");
+                Log.Warning("[GameRL] UnforbidByType: No map is currently loaded");
                 return;
             }
 
             var def = DefDatabase<ThingDef>.GetNamed(defName, errorOnFail: false);
             if (def == null)
             {
-                Log.Warning($"[GameRL] unforbid_by_type: Unknown def: {defName}");
+                Log.Warning($"[GameRL] UnforbidByType: Unknown item type '{defName}'. Check ForbiddenItemCounts in Resources for valid DefNames.");
                 return;
             }
 
@@ -523,7 +568,14 @@ namespace RimWorld.GameRL.Actions
                 }
             }
 
-            Log.Message($"[GameRL] unforbid_by_type: Unforbid {count} {defName}");
+            if (count > 0)
+            {
+                Log.Message($"[GameRL] UnforbidByType: Unforbid {count} {defName}");
+            }
+            else
+            {
+                Log.Warning($"[GameRL] UnforbidByType: No forbidden {defName} found on the map");
+            }
         }
 
         /// <summary>
@@ -536,26 +588,33 @@ namespace RimWorld.GameRL.Actions
         {
             if (building == null)
             {
-                Log.Warning("[GameRL] cancel_bill: Building not found");
+                Log.Warning("[GameRL] CancelBill: BuildingId not found. Use a ThingID from Entities.Buildings for workbenches.");
                 return;
             }
 
             var billGiver = building as IBillGiver;
             if (billGiver == null)
             {
-                Log.Warning($"[GameRL] cancel_bill: {building.ThingID} cannot accept bills");
+                Log.Warning($"[GameRL] CancelBill: {building.LabelShort} ({building.ThingID}) is not a workbench. Use ListWorkbenches to find valid workbenches.");
+                return;
+            }
+
+            if (billGiver.BillStack.Count == 0)
+            {
+                Log.Warning($"[GameRL] CancelBill: {building.LabelShort} ({building.ThingID}) has no bills to cancel.");
                 return;
             }
 
             if (billIndex < 0 || billIndex >= billGiver.BillStack.Count)
             {
-                Log.Warning($"[GameRL] cancel_bill: Bill index {billIndex} out of range (0-{billGiver.BillStack.Count - 1})");
+                Log.Warning($"[GameRL] CancelBill: Bill index {billIndex} out of range. Valid range: 0-{billGiver.BillStack.Count - 1}");
                 return;
             }
 
             var bill = billGiver.BillStack[billIndex];
+            var recipeName = bill.recipe?.defName ?? "unknown";
             billGiver.BillStack.Delete(bill);
-            Log.Message($"[GameRL] cancel_bill: Removed bill {billIndex} from {building.LabelShort}");
+            Log.Message($"[GameRL] CancelBill: Removed bill {billIndex} ({recipeName}) from {building.LabelShort}");
         }
 
         /// <summary>
@@ -570,37 +629,54 @@ namespace RimWorld.GameRL.Actions
         {
             if (building == null)
             {
-                Log.Warning("[GameRL] modify_bill: Building not found");
+                Log.Warning("[GameRL] ModifyBill: BuildingId not found. Use a ThingID from Entities.Buildings for workbenches.");
                 return;
             }
 
             var billGiver = building as IBillGiver;
             if (billGiver == null)
             {
-                Log.Warning($"[GameRL] modify_bill: {building.ThingID} cannot accept bills");
+                Log.Warning($"[GameRL] ModifyBill: {building.LabelShort} ({building.ThingID}) is not a workbench. Use ListWorkbenches to find valid workbenches.");
+                return;
+            }
+
+            if (billGiver.BillStack.Count == 0)
+            {
+                Log.Warning($"[GameRL] ModifyBill: {building.LabelShort} ({building.ThingID}) has no bills to modify. Use AddBill first.");
                 return;
             }
 
             if (billIndex < 0 || billIndex >= billGiver.BillStack.Count)
             {
-                Log.Warning($"[GameRL] modify_bill: Bill index {billIndex} out of range");
+                Log.Warning($"[GameRL] ModifyBill: Bill index {billIndex} out of range. Valid range: 0-{billGiver.BillStack.Count - 1}");
+                return;
+            }
+
+            if (count == null && repeatForever == null)
+            {
+                Log.Warning("[GameRL] ModifyBill: No changes specified. Provide Count (int) or RepeatForever (bool).");
                 return;
             }
 
             var bill = billGiver.BillStack[billIndex];
             if (bill is Bill_Production prodBill)
             {
+                var recipeName = bill.recipe?.defName ?? "unknown";
                 if (repeatForever == true)
                 {
                     prodBill.repeatMode = BillRepeatModeDefOf.Forever;
-                    Log.Message($"[GameRL] modify_bill: Set bill {billIndex} to repeat forever");
+                    Log.Message($"[GameRL] ModifyBill: Set bill {billIndex} ({recipeName}) to repeat forever");
                 }
                 else if (count.HasValue)
                 {
                     prodBill.repeatMode = BillRepeatModeDefOf.RepeatCount;
                     prodBill.repeatCount = count.Value;
-                    Log.Message($"[GameRL] modify_bill: Set bill {billIndex} count to {count.Value}");
+                    Log.Message($"[GameRL] ModifyBill: Set bill {billIndex} ({recipeName}) count to {count.Value}");
                 }
+            }
+            else
+            {
+                Log.Warning($"[GameRL] ModifyBill: Bill {billIndex} is not a production bill and cannot be modified.");
             }
         }
     }

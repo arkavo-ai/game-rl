@@ -26,13 +26,13 @@ namespace RimWorld.GameRL.Actions
         {
             if (pawn == null)
             {
-                Log.Warning("[GameRL] move: Pawn not found");
+                Log.Warning("[GameRL] Move: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
                 return;
             }
 
             if (!pawn.Drafted)
             {
-                Log.Warning($"[GameRL] move: Pawn {pawn.ThingID} is not drafted");
+                Log.Warning($"[GameRL] Move: {pawn.LabelShort} ({pawn.ThingID}) is not drafted. Call Draft first.");
                 return;
             }
 
@@ -47,13 +47,20 @@ namespace RimWorld.GameRL.Actions
         [GameRLAction("Draft", Description = "Draft a colonist for direct control")]
         public static void Draft([GameRLParam("ColonistId")] Pawn pawn)
         {
-            if (pawn?.drafter == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] draft: Pawn not found or cannot be drafted");
+                Log.Warning("[GameRL] Draft: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
+                return;
+            }
+
+            if (pawn.drafter == null)
+            {
+                Log.Warning($"[GameRL] Draft: {pawn.LabelShort} ({pawn.ThingID}) cannot be drafted (no drafter component)");
                 return;
             }
 
             pawn.drafter.Drafted = true;
+            Log.Message($"[GameRL] Draft: {pawn.LabelShort} is now drafted");
         }
 
         /// <summary>
@@ -62,13 +69,20 @@ namespace RimWorld.GameRL.Actions
         [GameRLAction("Undraft", Description = "Undraft a colonist")]
         public static void Undraft([GameRLParam("ColonistId")] Pawn pawn)
         {
-            if (pawn?.drafter == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] undraft: Pawn not found or cannot be undrafted");
+                Log.Warning("[GameRL] Undraft: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
+                return;
+            }
+
+            if (pawn.drafter == null)
+            {
+                Log.Warning($"[GameRL] Undraft: {pawn.LabelShort} ({pawn.ThingID}) cannot be undrafted (no drafter component)");
                 return;
             }
 
             pawn.drafter.Drafted = false;
+            Log.Message($"[GameRL] Undraft: {pawn.LabelShort} is now undrafted");
         }
 
         /// <summary>
@@ -82,26 +96,26 @@ namespace RimWorld.GameRL.Actions
         {
             if (pawn == null)
             {
-                Log.Warning("[GameRL] set_work_priority: Pawn not found");
+                Log.Warning("[GameRL] SetWorkPriority: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
                 return;
             }
 
             if (string.IsNullOrEmpty(workType))
             {
-                Log.Warning("[GameRL] set_work_priority: WorkType is required (e.g., Hauling, Cooking, Mining)");
+                Log.Warning("[GameRL] SetWorkPriority: WorkType is required. Valid types: Firefighter, Patient, Doctor, PatientBedRest, Childcare, BasicWorker, Warden, Handling, Cooking, Hunting, Construction, Growing, Mining, PlantCutting, Smithing, Tailoring, Art, Crafting, Hauling, Cleaning, Research");
                 return;
             }
 
             var workDef = DefDatabase<WorkTypeDef>.GetNamed(workType, errorOnFail: false);
             if (workDef == null)
             {
-                Log.Warning($"[GameRL] set_work_priority: Work type not found: {workType}");
+                Log.Warning($"[GameRL] SetWorkPriority: Unknown WorkType '{workType}'. Valid types: Firefighter, Patient, Doctor, PatientBedRest, Childcare, BasicWorker, Warden, Handling, Cooking, Hunting, Construction, Growing, Mining, PlantCutting, Smithing, Tailoring, Art, Crafting, Hauling, Cleaning, Research");
                 return;
             }
 
             if (pawn.workSettings == null)
             {
-                Log.Warning($"[GameRL] set_work_priority: workSettings is null for {pawn.LabelShort}");
+                Log.Warning($"[GameRL] SetWorkPriority: {pawn.LabelShort} ({pawn.ThingID}) has no work settings (might be incapable of work)");
                 return;
             }
 
@@ -135,20 +149,27 @@ namespace RimWorld.GameRL.Actions
             [GameRLParam("ColonistId")] Pawn pawn,
             [GameRLParam("TargetId")] Thing target)
         {
-            if (pawn == null || target == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] attack: Pawn or target not found");
+                Log.Warning("[GameRL] Attack: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
+                return;
+            }
+
+            if (target == null)
+            {
+                Log.Warning("[GameRL] Attack: TargetId not found. Use a ThingID from Entities.Threats or Entities.Animals");
                 return;
             }
 
             if (!pawn.Drafted)
             {
-                Log.Warning($"[GameRL] attack: Pawn {pawn.ThingID} is not drafted");
+                Log.Warning($"[GameRL] Attack: {pawn.LabelShort} ({pawn.ThingID}) is not drafted. Call Draft first.");
                 return;
             }
 
             var job = JobMaker.MakeJob(JobDefOf.AttackMelee, target);
             pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
+            Log.Message($"[GameRL] Attack: {pawn.LabelShort} attacking {target.LabelShort}");
         }
 
         /// <summary>
@@ -157,11 +178,17 @@ namespace RimWorld.GameRL.Actions
         [GameRLAction("Haul", Description = "Force a pawn to haul an item to a stockpile")]
         public static void Haul(
             [GameRLParam("ColonistId")] Pawn pawn,
-            [GameRLParam("ThingId")] Thing thing)
+            [GameRLParam("ItemId")] Thing thing)
         {
-            if (pawn == null || thing == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] haul: Pawn or thing not found");
+                Log.Warning("[GameRL] Haul: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
+                return;
+            }
+
+            if (thing == null)
+            {
+                Log.Warning("[GameRL] Haul: ItemId not found. Use a ThingID from Entities.Items or Resources");
                 return;
             }
 
@@ -169,10 +196,11 @@ namespace RimWorld.GameRL.Actions
             if (job != null)
             {
                 pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
+                Log.Message($"[GameRL] Haul: {pawn.LabelShort} hauling {thing.LabelShort} ({thing.ThingID})");
             }
             else
             {
-                Log.Warning($"[GameRL] haul: Could not create haul job for {thing.ThingID}");
+                Log.Warning($"[GameRL] Haul: Cannot haul {thing.LabelShort} ({thing.ThingID}) - no valid stockpile or item is forbidden/unreachable");
             }
         }
 
@@ -185,9 +213,15 @@ namespace RimWorld.GameRL.Actions
             [GameRLParam("TargetId")] Thing target,
             [GameRLParam("Distance")] int distance = 1)
         {
-            if (pawn == null || target == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] move_to_entity: Pawn or target not found");
+                Log.Warning("[GameRL] MoveToEntity: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
+                return;
+            }
+
+            if (target == null)
+            {
+                Log.Warning("[GameRL] MoveToEntity: TargetId not found. Use a ThingID from any Entities category");
                 return;
             }
 
@@ -202,14 +236,14 @@ namespace RimWorld.GameRL.Actions
                 targetCell = cells.FirstOrDefault();
                 if (targetCell == default)
                 {
-                    Log.Warning($"[GameRL] move_to_entity: No reachable cell near {target.ThingID}");
+                    Log.Warning($"[GameRL] MoveToEntity: No reachable cell near {target.LabelShort} ({target.ThingID}) at position ({target.Position.x},{target.Position.z})");
                     return;
                 }
             }
 
             var job = JobMaker.MakeJob(JobDefOf.Goto, targetCell);
             pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
-            Log.Message($"[GameRL] move_to_entity: {pawn.LabelShort} moving to {target.LabelShort} at {targetCell}");
+            Log.Message($"[GameRL] MoveToEntity: {pawn.LabelShort} moving to {target.LabelShort} at ({targetCell.x},{targetCell.z})");
         }
 
         /// <summary>
@@ -220,22 +254,34 @@ namespace RimWorld.GameRL.Actions
             [GameRLParam("ColonistId")] Pawn pawn,
             [GameRLParam("TargetId")] Pawn target)
         {
-            if (pawn == null || target == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] chat: Pawn or target not found");
+                Log.Warning("[GameRL] Chat: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
                 return;
             }
 
-            if (pawn.Downed || target.Downed)
+            if (target == null)
             {
-                Log.Warning("[GameRL] chat: Cannot chat with downed pawn");
+                Log.Warning("[GameRL] Chat: TargetId not found. Use a ThingID from Entities.Colonists or Entities.Visitors");
+                return;
+            }
+
+            if (pawn.Downed)
+            {
+                Log.Warning($"[GameRL] Chat: {pawn.LabelShort} ({pawn.ThingID}) is downed and cannot move");
+                return;
+            }
+
+            if (target.Downed)
+            {
+                Log.Warning($"[GameRL] Chat: Target {target.LabelShort} ({target.ThingID}) is downed");
                 return;
             }
 
             // Use GotoAndChitchat job to walk to and talk with target
             var job = JobMaker.MakeJob(JobDefOf.GotoAndBeSociallyActive, target);
             pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
-            Log.Message($"[GameRL] chat: {pawn.LabelShort} going to chat with {target.LabelShort}");
+            Log.Message($"[GameRL] Chat: {pawn.LabelShort} going to chat with {target.LabelShort}");
         }
 
         /// <summary>
@@ -246,22 +292,28 @@ namespace RimWorld.GameRL.Actions
             [GameRLParam("ColonistId")] Pawn pawn,
             [GameRLParam("WeaponId")] Thing weapon)
         {
-            if (pawn == null || weapon == null)
+            if (pawn == null)
             {
-                Log.Warning("[GameRL] equip: Pawn or weapon not found");
+                Log.Warning("[GameRL] Equip: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
+                return;
+            }
+
+            if (weapon == null)
+            {
+                Log.Warning("[GameRL] Equip: WeaponId not found. Use a ThingID from Entities.Weapons or Entities.Items");
                 return;
             }
 
             if (!weapon.def.IsWeapon)
             {
-                Log.Warning($"[GameRL] equip: {weapon.ThingID} is not a weapon");
+                Log.Warning($"[GameRL] Equip: {weapon.LabelShort} ({weapon.ThingID}) is not a weapon. Only weapons can be equipped.");
                 return;
             }
 
             // Create job to equip the weapon
             var job = JobMaker.MakeJob(JobDefOf.Equip, weapon);
             pawn.jobs?.StartJob(job, JobCondition.InterruptForced);
-            Log.Message($"[GameRL] equip: {pawn.LabelShort} going to equip {weapon.LabelShort}");
+            Log.Message($"[GameRL] Equip: {pawn.LabelShort} going to equip {weapon.LabelShort}");
         }
 
         /// <summary>
@@ -274,19 +326,19 @@ namespace RimWorld.GameRL.Actions
         {
             if (pawn == null)
             {
-                Log.Warning("[GameRL] set_medical_care: Pawn not found");
+                Log.Warning("[GameRL] SetMedicalCare: ColonistId not found. Use a ThingID from Entities.Colonists (e.g., 'Human123')");
                 return;
             }
 
             if (string.IsNullOrEmpty(careLevel))
             {
-                Log.Warning("[GameRL] set_medical_care: CareLevel is required (nocare, nomeds, herbal, normal, or best)");
+                Log.Warning("[GameRL] SetMedicalCare: CareLevel is required. Valid levels: nocare, nomeds, herbal, normal, best");
                 return;
             }
 
             if (pawn.playerSettings == null)
             {
-                Log.Warning($"[GameRL] set_medical_care: {pawn.LabelShort} has no player settings");
+                Log.Warning($"[GameRL] SetMedicalCare: {pawn.LabelShort} ({pawn.ThingID}) has no player settings (might be a non-colonist)");
                 return;
             }
 
@@ -320,12 +372,12 @@ namespace RimWorld.GameRL.Actions
                     care = MedicalCareCategory.Best;
                     break;
                 default:
-                    Log.Warning($"[GameRL] set_medical_care: Unknown care level: {careLevel}. Use: nocare, nomeds, herbal, normal, or best");
+                    Log.Warning($"[GameRL] SetMedicalCare: Unknown CareLevel '{careLevel}'. Valid levels: nocare (0), nomeds (1), herbal (2), normal (3), best (4)");
                     return;
             }
 
             pawn.playerSettings.medCare = care;
-            Log.Message($"[GameRL] set_medical_care: Set {pawn.LabelShort} to {care}");
+            Log.Message($"[GameRL] SetMedicalCare: Set {pawn.LabelShort} to {care}");
         }
     }
 }
