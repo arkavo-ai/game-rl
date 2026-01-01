@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <ModMetaData>
   <name>Arkavo Game-RL</name>
-  <author>arkavollc</author>
+  <author>Arkavo</author>
   <packageId>arkavo.gamerl.rimworld</packageId>
   <supportedVersions>
     <li>1.6</li>
