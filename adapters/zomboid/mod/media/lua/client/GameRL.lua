@@ -61,7 +61,8 @@ local function handleMessage(msg)
 
     elseif msg.Type == "ExecuteAction" then
         local action = msg.Action or {}
-        local result = ActionDispatcher.dispatch(action.Type or "Wait", action.Params or {})
+        -- Action params are at top level (Type, Direction, X, Y, etc), not nested in Params
+        local result = ActionDispatcher.dispatch(action.Type or "Wait", action)
         local obs = StateExtractor.extractObservation(false)
         local player = getPlayer()
         local done = player and player:isDead() or false

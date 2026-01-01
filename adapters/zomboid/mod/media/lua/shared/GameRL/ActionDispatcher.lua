@@ -39,20 +39,17 @@ function ActionDispatcher.Move(params)
     local y = params.Y or player:getY()
     local z = params.Z or player:getZ()
 
-    -- Calculate direction to target
-    local dx = x - player:getX()
-    local dy = y - player:getY()
-    local dist = math.sqrt(dx * dx + dy * dy)
-
-    if dist > 0.1 then
-        -- Normalize and set movement direction
-        local moveDir = player:getPlayerMoveDir()
-        moveDir:set(dx / dist, dy / dist)
-        player:setPlayerMoveDir(moveDir)
-        return ok("Move", "Moving toward (" .. x .. "," .. y .. "," .. z .. ")")
-    else
-        return ok("Move", "Already at target location")
+    -- Get target square
+    local targetSquare = getCell():getGridSquare(x, y, z)
+    if not targetSquare then
+        return fail("Move", "INVALID_TARGET", "Target square not found at " .. x .. "," .. y .. "," .. z)
     end
+
+    -- Clear any existing actions and queue walk-to
+    ISTimedActionQueue.clear(player)
+    ISTimedActionQueue.add(ISWalkToTimedAction:new(player, targetSquare))
+
+    return ok("Move", "Walking to (" .. x .. "," .. y .. "," .. z .. ")")
 end
 
 function ActionDispatcher.Sprint(params)
@@ -61,7 +58,9 @@ function ActionDispatcher.Sprint(params)
         return fail("Sprint", "INVALID_SURVIVOR", "Survivor not found")
     end
     player:setSprinting(true)
-    return ActionDispatcher.Move(params)
+    local result = ActionDispatcher.Move(params)
+    result.action = "Sprint"
+    return result
 end
 
 function ActionDispatcher.Sneak(params)
@@ -70,7 +69,44 @@ function ActionDispatcher.Sneak(params)
         return fail("Sneak", "INVALID_SURVIVOR", "Survivor not found")
     end
     player:setSneaking(true)
-    return ActionDispatcher.Move(params)
+    local result = ActionDispatcher.Move(params)
+    result.action = "Sneak"
+    return result
+end
+
+-- Simple directional walk (N/S/E/W) - moves 5 tiles in direction
+function ActionDispatcher.Walk(params)
+    local player = resolveSurvivor(params)
+    if not player then
+        return fail("Walk", "INVALID_SURVIVOR", "Survivor not found")
+    end
+
+    local dir = params.Direction or "North"
+    local distance = params.Distance or 5
+    local px, py, pz = player:getX(), player:getY(), player:getZ()
+    local tx, ty = px, py
+
+    if dir == "North" or dir == "N" then
+        ty = py - distance
+    elseif dir == "South" or dir == "S" then
+        ty = py + distance
+    elseif dir == "East" or dir == "E" then
+        tx = px + distance
+    elseif dir == "West" or dir == "W" then
+        tx = px - distance
+    elseif dir == "NE" or dir == "Northeast" then
+        tx, ty = px + distance, py - distance
+    elseif dir == "NW" or dir == "Northwest" then
+        tx, ty = px - distance, py - distance
+    elseif dir == "SE" or dir == "Southeast" then
+        tx, ty = px + distance, py + distance
+    elseif dir == "SW" or dir == "Southwest" then
+        tx, ty = px - distance, py + distance
+    else
+        return fail("Walk", "INVALID_DIRECTION", "Unknown direction: " .. tostring(dir))
+    end
+
+    return ActionDispatcher.Move({ X = tx, Y = ty, Z = pz })
 end
 
 function ActionDispatcher.Wait(params)
@@ -199,7 +235,8 @@ function ActionDispatcher.getActionSpace()
         type = "discrete_parameterized",
         actions = {
             { name = "Wait", description = "Do nothing, advance simulation" },
-            { name = "Move", description = "Move to target position", params = { X = { type = "int" }, Y = { type = "int" }, Z = { type = "int", min = 0, max = 7 } } },
+            { name = "Walk", description = "Walk in direction", params = { Direction = { type = "string", values = {"North", "South", "East", "West", "NE", "NW", "SE", "SW"} }, Distance = { type = "int", default = 5 } } },
+            { name = "Move", description = "Move to exact position", params = { X = { type = "int" }, Y = { type = "int" }, Z = { type = "int", min = 0, max = 7 } } },
             { name = "Sprint", description = "Sprint to position", params = { X = { type = "int" }, Y = { type = "int" } } },
             { name = "Sneak", description = "Sneak to position", params = { X = { type = "int" }, Y = { type = "int" } } },
             { name = "Attack", description = "Attack target", params = { TargetId = { type = "string" } } },
