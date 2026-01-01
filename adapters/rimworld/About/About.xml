@@ -20,6 +20,16 @@
 
 Enables AI agents to observe and control RimWorld colonies through the Game-RL protocol. Connect with Claude Code for natural language colony management.
 
+SETUP (macOS):
+1. Install Claude Code: https://claude.ai/code
+2. Load a RimWorld save game
+3. Run in Terminal:
+   mkdir -p ~/arkavo-rimworld
+   cd ~/arkavo-rimworld
+   claude mcp add game-rl -- '$HOME/Library/Application Support/Steam/steamapps/workshop/content/294100/3634065510/bin/macos/harmony-server' /tmp/gamerl-rimworld.sock
+   claude
+4. Ask Claude: What's the colony status?
+
 Features:
 - ColonyManager agent for strategic colony control
 - Work priority management
