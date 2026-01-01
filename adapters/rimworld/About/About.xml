@@ -4,8 +4,6 @@
   <author>Arkavo</author>
   <packageId>arkavo.gamerl.rimworld</packageId>
   <supportedVersions>
-    <li>1.4</li>
-    <li>1.5</li>
     <li>1.6</li>
   </supportedVersions>
   <modDependencies>
