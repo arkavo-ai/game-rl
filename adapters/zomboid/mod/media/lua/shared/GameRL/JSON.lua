@@ -45,7 +45,7 @@ function JSON.encodeString(s)
     return '"' .. escaped .. '"'
 end
 
--- Check if table is an array
+-- Check if table is an array (empty table = object, not array)
 local function isArray(t)
     local i = 0
     for _ in pairs(t) do
@@ -54,7 +54,8 @@ local function isArray(t)
             return false
         end
     end
-    return true
+    -- Empty table should be object {}, not array []
+    return i > 0
 end
 
 -- Encode a table as JSON object or array

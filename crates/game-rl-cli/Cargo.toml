@@ -1,6 +1,6 @@
 [package]
-name = "harmony-bridge"
-description = "Bridge between Rust MCP server and .NET games via Harmony"
+name = "game-rl-cli"
+description = "Game-RL MCP server CLI with auto-detection"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -9,12 +9,15 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
+[[bin]]
+name = "game-rl-server"
+path = "src/main.rs"
+
 [dependencies]
-game-rl-core = { workspace = true }
 game-rl-server = { workspace = true }
-game-bridge = { workspace = true }
+harmony-bridge = { workspace = true }
+zomboid-bridge = { workspace = true }
 tokio = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
 tracing = { workspace = true }
-async-trait = "0.1"
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }

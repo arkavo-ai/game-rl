@@ -113,7 +113,7 @@ function IPC.send(message)
 
     file:write(data)
     file:close()
-    print("[GameRL] Sent: " .. message.type)
+    print("[GameRL] Sent: " .. tostring(message.Type or "?"))
 
     return true
 end
@@ -150,7 +150,7 @@ function IPC.receive()
 
     local JSON = require("GameRL/JSON")
     local message = JSON.decode(content)
-    print("[GameRL] Received: " .. (message and message.type or "nil"))
+    print("[GameRL] Received: " .. tostring(message and message.Type or "nil"))
     return message
 end
 

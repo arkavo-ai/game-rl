@@ -160,19 +160,10 @@ function StateExtractor.extractGameTime()
     return time
 end
 
--- Extract weather
+-- Extract weather (simplified - climate API has compatibility issues)
 function StateExtractor.extractWeather()
-    local weather = { Condition = "Clear", Temperature = 20.0 }
-
-    pcall(function()
-        local climateManager = getClimateManager()
-        if climateManager then
-            weather.Temperature = climateManager:getAirTemperatureForCharacter()
-            -- Could add more weather info here
-        end
-    end)
-
-    return weather
+    -- Return defaults; climate API calls vary by PZ version
+    return { Condition = "Clear", Temperature = 20.0 }
 end
 
 -- Get current tick

@@ -65,17 +65,16 @@ local function handleMessage(msg)
         local obs = StateExtractor.extractObservation(false)
         local player = getPlayer()
         local done = player and player:isDead() or false
+        -- Fields flattened (no Result wrapper) to match Rust #[serde(flatten)]
         IPC.send({
             Type = "StepResult",
-            Result = {
-                AgentId = msg.AgentId,
-                Observation = obs,
-                Reward = result.success and 0.1 or -0.1,
-                RewardComponents = {},
-                Done = done,
-                Truncated = false,
-                StateHash = StateExtractor.computeStateHash()
-            }
+            AgentId = msg.AgentId,
+            Observation = obs,
+            Reward = result.success and 0.1 or -0.1,
+            RewardComponents = {},
+            Done = done,
+            Truncated = false,
+            StateHash = StateExtractor.computeStateHash()
         })
 
     elseif msg.Type == "GetStateHash" then

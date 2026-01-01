@@ -1,6 +1,6 @@
 [package]
 name = "zomboid-bridge"
-description = "Bridge between Rust MCP server and Project Zomboid via Java mod"
+description = "Bridge between Rust MCP server and Project Zomboid via Lua mod"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -9,10 +9,6 @@ license.workspace = true
 repository.workspace = true
 authors.workspace = true
 
-[[bin]]
-name = "zomboid-server"
-path = "src/main.rs"
-
 [dependencies]
 game-rl-core = { workspace = true }
 game-rl-server = { workspace = true }
@@ -20,7 +16,5 @@ game-bridge = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 async-trait = "0.1"

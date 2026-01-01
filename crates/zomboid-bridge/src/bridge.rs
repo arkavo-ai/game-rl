@@ -151,10 +151,73 @@ impl ZomboidBridge {
         }
     }
 
-    /// Send a command and wait for response
+    /// Check if PZ restarted (status file is empty or missing ready signal)
+    async fn check_game_alive(&self) -> bool {
+        match fs::read_to_string(&self.status_file).await {
+            Ok(content) => content.contains("\"status\":\"ready\""),
+            Err(_) => false,
+        }
+    }
+
+    /// Attempt to reconnect to PZ after it restarts
+    async fn reconnect(&mut self) -> Result<()> {
+        info!("Attempting to reconnect to Project Zomboid...");
+        self.connected = false;
+
+        // Wait for Lua to create fresh status file
+        let mut last_log = std::time::Instant::now();
+        loop {
+            // Check if status file exists but is empty (PZ restarted and created it)
+            if let Ok(content) = fs::read_to_string(&self.status_file).await {
+                if content.is_empty() || !content.contains("\"status\":\"ready\"") {
+                    info!("Status file found (fresh), writing ready signal...");
+                    break;
+                }
+            }
+            if last_log.elapsed() > Duration::from_secs(5) {
+                info!("Waiting for PZ to restart...");
+                last_log = std::time::Instant::now();
+            }
+            sleep(self.config.poll_interval).await;
+        }
+
+        // Write ready signal
+        let _ = fs::write(&self.command_file, "").await;
+        let status = r#"{"status":"ready","version":"0.5.0"}"#;
+        fs::write(&self.status_file, status)
+            .await
+            .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
+
+        info!("Waiting for Ready message from game...");
+
+        // Wait for Ready message
+        let ready_msg = self.wait_for_initial_response().await?;
+
+        match ready_msg {
+            GameMessage::Ready {
+                name,
+                version,
+                capabilities,
+            } => {
+                info!("Reconnected to {} v{}", name, version);
+                self.game_name = name;
+                self.game_version = version;
+                self.capabilities = Some(capabilities);
+                self.connected = true;
+                Ok(())
+            }
+            _ => Err(GameRLError::ProtocolError(format!(
+                "Expected Ready message, got {:?}",
+                ready_msg
+            ))),
+        }
+    }
+
+    /// Send a command and wait for response (with auto-reconnect on timeout)
     async fn request(&mut self, msg: GameMessage) -> Result<GameMessage> {
+        // Auto-reconnect if not connected
         if !self.connected {
-            return Err(GameRLError::IpcError("Not connected".into()));
+            self.reconnect().await?;
         }
 
         // Serialize message
@@ -169,7 +232,23 @@ impl ZomboidBridge {
             .map_err(|e| GameRLError::IpcError(format!("Failed to write command: {}", e)))?;
 
         // Wait for response
-        self.wait_for_response().await
+        match self.wait_for_response().await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                // On timeout, check if game died and try to reconnect
+                if !self.check_game_alive().await {
+                    warn!("Game appears to have restarted, attempting reconnect...");
+                    self.reconnect().await?;
+                    // Retry the request once after reconnect
+                    fs::write(&self.command_file, &json)
+                        .await
+                        .map_err(|e| GameRLError::IpcError(format!("Failed to write command: {}", e)))?;
+                    self.wait_for_response().await
+                } else {
+                    Err(e)
+                }
+            }
+        }
     }
 
     /// Wait for a response in the response file
