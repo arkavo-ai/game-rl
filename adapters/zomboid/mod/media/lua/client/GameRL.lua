@@ -10,6 +10,11 @@ GameRL.initialized = false
 GameRL.connected = false
 GameRL.tickCount = 0
 GameRL.updateCount = 0
+GameRL.dangerThreshold = 8  -- tiles - send alert when zombies this close
+GameRL.lastDangerAlert = 0  -- timestamp of last alert
+GameRL.dangerAlertCooldown = 500  -- ms between alerts
+GameRL.autoPauseOnDanger = true  -- auto-pause when in danger
+GameRL.pendingDangerAlert = nil  -- buffered alert for next response
 
 -- Lazy-loaded modules
 local IPC, StateExtractor, ActionDispatcher, Shared, JSON
@@ -66,6 +71,11 @@ local function handleMessage(msg)
         local obs = StateExtractor.extractObservation(false)
         local player = getPlayer()
         local done = player and player:isDead() or false
+
+        -- Include danger alert if pending
+        local dangerAlert = GameRL.pendingDangerAlert
+        GameRL.pendingDangerAlert = nil  -- consume it
+
         -- Fields flattened (no Result wrapper) to match Rust #[serde(flatten)]
         IPC.send({
             Type = "StepResult",
@@ -75,7 +85,8 @@ local function handleMessage(msg)
             RewardComponents = {},
             Done = done,
             Truncated = false,
-            StateHash = StateExtractor.computeStateHash()
+            StateHash = StateExtractor.computeStateHash(),
+            DangerAlert = dangerAlert  -- nil if no danger, object if danger detected
         })
 
     elseif msg.Type == "GetStateHash" then
@@ -104,6 +115,75 @@ local function tryConnect()
         return true
     end
     return false
+end
+
+-- Check for danger and send alert
+local function checkDanger()
+    if not GameRL.connected or not IPC then return end
+
+    local player = getPlayer()
+    if not player or player:isDead() then return end
+
+    local now = getTimestampMs()
+    if now - GameRL.lastDangerAlert < GameRL.dangerAlertCooldown then return end
+
+    -- Find closest zombie
+    local cell = getCell()
+    if not cell then return end
+
+    local px, py, pz = player:getX(), player:getY(), player:getZ()
+    local closestDist = GameRL.dangerThreshold + 1
+    local closestZombie = nil
+    local dangerousZombies = {}
+
+    local zombieList = cell:getZombieList()
+    if zombieList then
+        for i = 0, zombieList:size() - 1 do
+            local zombie = zombieList:get(i)
+            if zombie and not zombie:isDead() then
+                local dist = player:DistTo(zombie)
+                if dist <= GameRL.dangerThreshold then
+                    table.insert(dangerousZombies, {
+                        Id = "Zombie" .. zombie:getID(),
+                        Distance = dist,
+                        X = zombie:getX(),
+                        Y = zombie:getY()
+                    })
+                    if dist < closestDist then
+                        closestDist = dist
+                        closestZombie = zombie
+                    end
+                end
+            end
+        end
+    end
+
+    -- Send danger alert if threats detected
+    if #dangerousZombies > 0 then
+        GameRL.lastDangerAlert = now
+
+        -- Auto-pause if enabled
+        if GameRL.autoPauseOnDanger then
+            pcall(function()
+                local speedControls = UIManager.getSpeedControls()
+                if speedControls then
+                    speedControls:SetCurrentGameSpeed(0)
+                end
+            end)
+        end
+
+        -- Buffer alert for next response
+        GameRL.pendingDangerAlert = {
+            Type = "DangerAlert",
+            ThreatCount = #dangerousZombies,
+            ClosestDistance = closestDist,
+            Threats = dangerousZombies,
+            PlayerPosition = { X = px, Y = py, Z = pz },
+            AutoPaused = GameRL.autoPauseOnDanger
+        }
+
+        print("[GameRL] DANGER! " .. #dangerousZombies .. " zombies within " .. GameRL.dangerThreshold .. " tiles!")
+    end
 end
 
 -- EVENT HANDLERS (direct, no indirection)
@@ -153,6 +233,11 @@ Events.OnTick.Add(function()
         local msg = IPC.receive()
         if msg then handleMessage(msg) end
     end
+
+    -- Check for danger every 10 ticks (~6 times per second)
+    if GameRL.tickCount % 10 == 0 then
+        checkDanger()
+    end
 end)
 
 print("[GameRL] Registering OnPlayerUpdate...")
@@ -163,6 +248,24 @@ Events.OnPlayerUpdate.Add(function(player)
     end
     if GameRL.updateCount % 300 == 0 then
         print("[GameRL] Update #" .. GameRL.updateCount)
+    end
+end)
+
+-- Process IPC even when paused (OnPreUIDraw fires regardless of pause state)
+print("[GameRL] Registering OnPreUIDraw for pause-safe IPC...")
+GameRL.lastIPCCheck = 0
+Events.OnPreUIDraw.Add(function()
+    if not GameRL.connected or not IPC then return end
+
+    -- Throttle to every 100ms to avoid excessive polling
+    local now = getTimestampMs()
+    if now - GameRL.lastIPCCheck < 100 then return end
+    GameRL.lastIPCCheck = now
+
+    -- Always check for IPC (handles paused state)
+    if IPC.available() then
+        local msg = IPC.receive()
+        if msg then handleMessage(msg) end
     end
 end)
 

@@ -10,9 +10,14 @@ pub type AgentId = String;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub enum AgentType {
-    /// Controls a single game entity (NPC, unit, pawn)
+    /// Controls a single game entity (NPC, unit, pawn, survivor)
     EntityBehavior,
-    /// High-level strategic control of multiple entities
+    /// Player-controlled character (first/third person games)
+    Player,
+    /// High-level strategic control of multiple entities (RTS, colony sims)
+    StrategyController,
+    /// Legacy alias for StrategyController
+    #[serde(alias = "ColonyManager")]
     ColonyManager,
     /// Controls environmental systems (weather, economy, spawning)
     WorldSimulation,

@@ -48,10 +48,34 @@ function StateExtractor.extractSurvivor(player)
         local primary = player:getPrimaryHandItem()
         if primary then
             state.PrimaryWeapon = primary:getDisplayName()
+            state.PrimaryWeaponType = primary:getType()
         end
         local secondary = player:getSecondaryHandItem()
         if secondary then
             state.SecondaryWeapon = secondary:getDisplayName()
+        end
+    end)
+
+    -- Inventory summary
+    pcall(function()
+        local inv = player:getInventory()
+        if inv then
+            local inventory = {}
+            local items = inv:getItems()
+            for i = 0, math.min(items:size() - 1, 20) do
+                local item = items:get(i)
+                if item then
+                    table.insert(inventory, {
+                        Id = tostring(item:getID()),
+                        Name = item:getDisplayName(),
+                        Type = item:getType(),
+                        IsWeapon = instanceof(item, "HandWeapon"),
+                        IsFood = instanceof(item, "Food")
+                    })
+                end
+            end
+            state.Inventory = inventory
+            state.InventoryCount = items:size()
         end
     end)
 
