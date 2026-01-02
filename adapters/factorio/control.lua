@@ -543,6 +543,329 @@ local function execute_action(agent_id, action)
             return false, "Cannot place turret at position"
         end
 
+    -- ========== LOGISTICS / INVENTORY ACTIONS ==========
+
+    elseif action_type == "TransferItems" then
+        -- Transfer items between two entity inventories
+        local from_id = action.from_entity_id or action.FromEntityId
+        local to_id = action.to_entity_id or action.ToEntityId
+        local item_name = action.item or action.Item
+        local count = action.count or action.Count or 1
+        local from_inv_type = action.from_inventory or action.FromInventory or "output"
+        local to_inv_type = action.to_inventory or action.ToInventory or "input"
+
+        if not from_id or not to_id then
+            return false, "TransferItems requires from_entity_id and to_entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        -- Find entities
+        local from_entity, to_entity = nil, nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == from_id then from_entity = e end
+            if e.unit_number == to_id then to_entity = e end
+            if from_entity and to_entity then break end
+        end
+
+        if not from_entity or not from_entity.valid then
+            return false, "Source entity not found"
+        end
+        if not to_entity or not to_entity.valid then
+            return false, "Destination entity not found"
+        end
+
+        -- Map inventory type strings to defines
+        local inv_map = {
+            input = defines.inventory.assembling_machine_input or defines.inventory.furnace_source or defines.inventory.chest,
+            output = defines.inventory.assembling_machine_output or defines.inventory.furnace_result or defines.inventory.chest,
+            chest = defines.inventory.chest,
+            fuel = defines.inventory.fuel,
+            burnt_result = defines.inventory.burnt_result,
+        }
+
+        local from_inv = from_entity.get_inventory(inv_map[from_inv_type] or defines.inventory.chest)
+        local to_inv = to_entity.get_inventory(inv_map[to_inv_type] or defines.inventory.chest)
+
+        if not from_inv then
+            return false, "Source entity has no inventory"
+        end
+        if not to_inv then
+            return false, "Destination entity has no inventory"
+        end
+
+        -- Transfer items
+        local transferred = 0
+        if item_name then
+            -- Transfer specific item
+            local available = from_inv.get_item_count(item_name)
+            local to_transfer = math.min(count, available)
+            if to_transfer > 0 then
+                local inserted = to_inv.insert{name = item_name, count = to_transfer}
+                if inserted > 0 then
+                    from_inv.remove{name = item_name, count = inserted}
+                    transferred = inserted
+                end
+            end
+        else
+            -- Transfer any items up to count
+            local contents = from_inv.get_contents()
+            for _, item in pairs(contents) do
+                if transferred >= count then break end
+                local to_transfer = math.min(item.count, count - transferred)
+                local inserted = to_inv.insert{name = item.name, count = to_transfer}
+                if inserted > 0 then
+                    from_inv.remove{name = item.name, count = inserted}
+                    transferred = transferred + inserted
+                end
+            end
+        end
+
+        return transferred > 0, transferred > 0 and nil or "No items transferred"
+
+    elseif action_type == "InsertItems" then
+        -- Insert items into an entity (spawns items, useful for testing)
+        local entity_id = action.entity_id or action.EntityId
+        local position = action.position or action.Position
+        local item_name = action.item or action.Item
+        local count = action.count or action.Count or 1
+        local inv_type = action.inventory or action.Inventory or "input"
+
+        if not item_name then
+            return false, "InsertItems requires item name"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        -- Find entity
+        local entity = nil
+        if entity_id then
+            for _, e in pairs(surface.find_entities_filtered{force = force}) do
+                if e.unit_number == entity_id then
+                    entity = e
+                    break
+                end
+            end
+        elseif position then
+            local entities = surface.find_entities_filtered{
+                position = {position[1], position[2]},
+                force = force,
+                limit = 1,
+            }
+            entity = entities[1]
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        -- Get appropriate inventory
+        local inv = nil
+        if inv_type == "fuel" then
+            inv = entity.get_fuel_inventory()
+        elseif inv_type == "output" then
+            inv = entity.get_output_inventory()
+        else
+            inv = entity.get_inventory(defines.inventory.chest) or
+                  entity.get_inventory(defines.inventory.assembling_machine_input) or
+                  entity.get_inventory(defines.inventory.furnace_source)
+        end
+
+        if not inv then
+            return false, "Entity has no suitable inventory"
+        end
+
+        local inserted = inv.insert{name = item_name, count = count}
+        return inserted > 0, inserted > 0 and nil or "Failed to insert items"
+
+    elseif action_type == "DeconstructArea" then
+        -- Mark an area for deconstruction
+        local position = action.position or action.Position
+        local radius = action.radius or action.Radius or 5
+
+        if not position then
+            return false, "DeconstructArea requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local area = {
+            {position[1] - radius, position[2] - radius},
+            {position[1] + radius, position[2] + radius}
+        }
+
+        local entities = surface.find_entities_filtered{
+            area = area,
+            force = force,
+        }
+
+        local count = 0
+        for _, entity in pairs(entities) do
+            if entity.valid and entity.to_be_deconstructed() == false then
+                -- Order deconstruction
+                local ok = pcall(function()
+                    entity.order_deconstruction(force)
+                end)
+                if ok then count = count + 1 end
+            end
+        end
+
+        return count > 0, count > 0 and nil or "No entities marked for deconstruction"
+
+    elseif action_type == "CancelDeconstruct" then
+        -- Cancel deconstruction orders in area
+        local position = action.position or action.Position
+        local radius = action.radius or action.Radius or 5
+
+        if not position then
+            return false, "CancelDeconstruct requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local area = {
+            {position[1] - radius, position[2] - radius},
+            {position[1] + radius, position[2] + radius}
+        }
+
+        local entities = surface.find_entities_filtered{
+            area = area,
+            force = force,
+        }
+
+        local count = 0
+        for _, entity in pairs(entities) do
+            if entity.valid and entity.to_be_deconstructed() then
+                entity.cancel_deconstruction(force)
+                count = count + 1
+            end
+        end
+
+        return count > 0, count > 0 and nil or "No deconstruction orders cancelled"
+
+    elseif action_type == "SetFilter" then
+        -- Set filter on inserter or container slot
+        local entity_id = action.entity_id or action.EntityId
+        local slot = action.slot or action.Slot or 1
+        local item_name = action.item or action.Item  -- nil to clear filter
+
+        if not entity_id then
+            return false, "SetFilter requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        -- Find entity
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = {"inserter", "container", "logistic-container"}}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        -- Set filter based on entity type
+        if entity.type == "inserter" then
+            -- Inserters have filter slots
+            local ok, err = pcall(function()
+                entity.set_filter(slot, item_name)
+            end)
+            return ok, ok and nil or ("Failed to set filter: " .. tostring(err))
+        elseif entity.type == "container" or entity.type == "logistic-container" then
+            -- Containers with bar setting or logistic filters
+            if entity.prototype.logistic_mode then
+                -- Logistic container - set request slot
+                local ok, err = pcall(function()
+                    if item_name then
+                        entity.set_request_slot({name = item_name, count = action.count or 100}, slot)
+                    else
+                        entity.clear_request_slot(slot)
+                    end
+                end)
+                return ok, ok and nil or ("Failed to set logistic filter: " .. tostring(err))
+            else
+                return false, "Container does not support filters"
+            end
+        else
+            return false, "Entity type does not support filters"
+        end
+
+    elseif action_type == "SetInserterStack" then
+        -- Set inserter stack size override
+        local entity_id = action.entity_id or action.EntityId
+        local stack_size = action.stack_size or action.StackSize
+
+        if not entity_id then
+            return false, "SetInserterStack requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = "inserter"}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Inserter not found"
+        end
+
+        local ok, err = pcall(function()
+            entity.inserter_stack_size_override = stack_size or 0
+        end)
+        return ok, ok and nil or ("Failed to set stack size: " .. tostring(err))
+
+    elseif action_type == "ConnectWire" then
+        -- Connect two entities with wire (circuit network)
+        local from_id = action.from_entity_id or action.FromEntityId
+        local to_id = action.to_entity_id or action.ToEntityId
+        local wire_type = action.wire or action.Wire or "red"  -- "red" or "green"
+
+        if not from_id or not to_id then
+            return false, "ConnectWire requires from_entity_id and to_entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local from_entity, to_entity = nil, nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == from_id then from_entity = e end
+            if e.unit_number == to_id then to_entity = e end
+            if from_entity and to_entity then break end
+        end
+
+        if not from_entity or not from_entity.valid then
+            return false, "Source entity not found"
+        end
+        if not to_entity or not to_entity.valid then
+            return false, "Target entity not found"
+        end
+
+        local wire_def = wire_type == "green" and defines.wire_type.green or defines.wire_type.red
+
+        local ok, err = pcall(function()
+            from_entity.connect_neighbour{
+                wire = wire_def,
+                target_entity = to_entity,
+            }
+        end)
+
+        return ok, ok and nil or ("Failed to connect wire: " .. tostring(err))
+
     else
         return false, "Unknown action type: " .. tostring(action_type)
     end
