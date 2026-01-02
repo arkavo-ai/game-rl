@@ -153,14 +153,6 @@ impl FactorioBridge {
     pub fn is_connected(&self) -> bool {
         self.connected && self.rcon.is_connected()
     }
-
-    /// Execute a Lua command that returns JSON
-    async fn lua_json<T: serde::de::DeserializeOwned>(&self, lua: &str) -> Result<T> {
-        let response = self.rcon.lua(lua).await?;
-        serde_json::from_str(&response).map_err(|e| {
-            GameRLError::SerializationError(format!("Failed to parse response: {}", e))
-        })
-    }
 }
 
 impl Default for FactorioBridge {

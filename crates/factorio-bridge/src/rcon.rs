@@ -11,11 +11,7 @@ use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 /// RCON packet type constants
-/// Note: In RCON protocol, some types share the same value:
-/// - AuthResponse and ExecCommand both use 2 (differentiated by context)
 pub mod packet_type {
-    /// Response to a command (or auth response on success)
-    pub const RESPONSE_VALUE: i32 = 0;
     /// Authentication response / Execute command (context-dependent)
     pub const EXEC_COMMAND: i32 = 2;
     /// Authenticate with password
@@ -164,15 +160,6 @@ impl RconClient {
         self.authenticated.store(true, Ordering::SeqCst);
         info!("RCON authenticated successfully");
 
-        Ok(())
-    }
-
-    /// Reconnect if disconnected
-    async fn ensure_connected(&self) -> Result<()> {
-        if !self.authenticated.load(Ordering::SeqCst) {
-            info!("RCON disconnected, reconnecting...");
-            self.connect().await?;
-        }
         Ok(())
     }
 
