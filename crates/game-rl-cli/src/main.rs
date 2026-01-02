@@ -2,7 +2,7 @@
 //!
 //! Unified server that auto-detects which game is running:
 //! - RimWorld via Unix socket (/tmp/gamerl-rimworld.sock)
-//! - Project Zomboid via file IPC (~/Zomboid/Lua/gamerl_status.json)
+//! - Project Zomboid via file IPC (~/Zomboid/Lua/gamerl_response.json)
 
 use anyhow::Result;
 use game_rl_server::{GameEnvironment, GameRLServer};
@@ -43,7 +43,7 @@ async fn main() -> Result<()> {
 
     // Detection paths
     let zomboid_config = ZomboidConfig::default();
-    let zomboid_status = zomboid_config.ipc_path.join("gamerl_status.json");
+    let zomboid_response = zomboid_config.ipc_path.join("gamerl_response.json");
 
     // Auto-detect game
     let game = loop {
@@ -57,19 +57,19 @@ async fn main() -> Result<()> {
             }
         }
 
-        // Check Zomboid status file
-        if zomboid_status.exists() {
-            info!("Project Zomboid IPC detected: {:?}", zomboid_status);
+        // Check Zomboid response file (Lua writes Ready message here)
+        if zomboid_response.exists() {
+            info!("Project Zomboid IPC detected: {:?}", zomboid_response);
             let mut bridge = ZomboidBridge::with_config(zomboid_config.clone());
             match bridge.init().await {
                 Ok(()) => break DetectedGame::Zomboid(bridge),
-                Err(e) => warn!("Zomboid status exists but init failed: {}", e),
+                Err(e) => warn!("Zomboid response exists but init failed: {}", e),
             }
         }
 
         info!(
             "Waiting for game... (RimWorld: {}, Zomboid: {:?})",
-            RIMWORLD_SOCKET, zomboid_status
+            RIMWORLD_SOCKET, zomboid_response
         );
         sleep(Duration::from_secs(2)).await;
     };

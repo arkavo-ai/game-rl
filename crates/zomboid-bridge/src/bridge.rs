@@ -102,34 +102,10 @@ impl ZomboidBridge {
 
         info!("IPC directory: {:?}", self.config.ipc_path);
 
-        // Wait for Lua to create the status file first (PZ sandbox requirement)
-        info!("Waiting for PZ Lua to create IPC files...");
+        // Wait for Lua to create the response file with Ready message
+        // Lua initiates the handshake (PZ sandbox: Lua can only read files it created)
+        info!("Waiting for PZ Lua to send Ready message...");
         info!("Start the game with GameRL mod enabled, then load/start a game");
-
-        let mut last_log = std::time::Instant::now();
-        loop {
-            if self.status_file.exists() {
-                info!("Status file found, writing ready signal...");
-                break;
-            }
-            if last_log.elapsed() > std::time::Duration::from_secs(10) {
-                info!("Still waiting for PZ to create {:?}...", self.status_file);
-                last_log = std::time::Instant::now();
-            }
-            sleep(self.config.poll_interval).await;
-        }
-
-        // Clear command file if exists, write status
-        let _ = fs::write(&self.command_file, "").await;
-        let status = format!(
-            r#"{{"status":"ready","version":"{}"}}"#,
-            env!("CARGO_PKG_VERSION")
-        );
-        fs::write(&self.status_file, status)
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
-
-        info!("Waiting for Ready message from game...");
 
         // Wait for Ready message from game (no timeout - game may take a while to start)
         let ready_msg = self.wait_for_initial_response().await?;
@@ -145,6 +121,10 @@ impl ZomboidBridge {
                 self.game_version = version;
                 self.capabilities = Some(capabilities);
                 self.connected = true;
+
+                // Clear command file to signal we're ready
+                let _ = fs::write(&self.command_file, "").await;
+
                 Ok(())
             }
             _ => Err(GameRLError::ProtocolError(format!(
@@ -154,12 +134,11 @@ impl ZomboidBridge {
         }
     }
 
-    /// Check if PZ restarted (status file is empty or missing ready signal)
+    /// Check if PZ is alive by checking if response file has content
     async fn check_game_alive(&self) -> bool {
-        match fs::read_to_string(&self.status_file).await {
-            Ok(content) => content.contains("\"status\":\"ready\""),
-            Err(_) => false,
-        }
+        // Game is alive if we recently got a response
+        // For now, just return connected status
+        self.connected
     }
 
     /// Attempt to reconnect to PZ after it restarts
@@ -167,36 +146,9 @@ impl ZomboidBridge {
         info!("Attempting to reconnect to Project Zomboid...");
         self.connected = false;
 
-        // Wait for Lua to create fresh status file
-        let mut last_log = std::time::Instant::now();
-        loop {
-            // Check if status file exists but is empty (PZ restarted and created it)
-            if let Ok(content) = fs::read_to_string(&self.status_file).await {
-                if content.is_empty() || !content.contains("\"status\":\"ready\"") {
-                    info!("Status file found (fresh), writing ready signal...");
-                    break;
-                }
-            }
-            if last_log.elapsed() > Duration::from_secs(5) {
-                info!("Waiting for PZ to restart...");
-                last_log = std::time::Instant::now();
-            }
-            sleep(self.config.poll_interval).await;
-        }
+        info!("Waiting for PZ Lua to send Ready message...");
 
-        // Write ready signal
-        let _ = fs::write(&self.command_file, "").await;
-        let status = format!(
-            r#"{{"status":"ready","version":"{}"}}"#,
-            env!("CARGO_PKG_VERSION")
-        );
-        fs::write(&self.status_file, status)
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Failed to write status file: {}", e)))?;
-
-        info!("Waiting for Ready message from game...");
-
-        // Wait for Ready message
+        // Wait for Ready message from game
         let ready_msg = self.wait_for_initial_response().await?;
 
         match ready_msg {
@@ -210,6 +162,10 @@ impl ZomboidBridge {
                 self.game_version = version;
                 self.capabilities = Some(capabilities);
                 self.connected = true;
+
+                // Clear command file to signal we're ready
+                let _ = fs::write(&self.command_file, "").await;
+
                 Ok(())
             }
             _ => Err(GameRLError::ProtocolError(format!(

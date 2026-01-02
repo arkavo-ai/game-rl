@@ -43,47 +43,18 @@ function IPC.init()
     return true
 end
 
--- Check if zomboid-server is ready (status file exists and has "ready")
-function IPC.checkServerReady()
-    local file = getFileReader(IPC.statusFile, true)
-    if not file then
-        return false
-    end
-
-    local content = ""
-    local line = file:readLine()
-    while line do
-        content = content .. line
-        line = file:readLine()
-    end
-    file:close()
-
-    if content:find('"status":"ready"') or content:find('"status": "ready"') then
-        print("[GameRL] Server ready!")
-        return true
-    end
-
-    return false
-end
-
--- Connect (check if server is ready)
+-- Connect: init files and mark as connected
+-- Lua initiates - no need to wait for Rust since Lua owns the files
 function IPC.connect()
     print("[GameRL] IPC.connect() called")
     if not IPC.basePath then
         IPC.init()
     end
 
-    print("[GameRL] Checking server ready at: " .. tostring(IPC.statusFile))
-    local ready = IPC.checkServerReady()
-    print("[GameRL] Server ready: " .. tostring(ready))
-
-    if ready then
-        IPC.connected = true
-        print("[GameRL] Connected via file IPC!")
-        return true
-    end
-
-    return false
+    -- Lua always initiates - we own the files
+    IPC.connected = true
+    print("[GameRL] Connected via file IPC (Lua-initiated)")
+    return true
 end
 
 -- Disconnect
