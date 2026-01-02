@@ -45,6 +45,14 @@ Then:
 > **Note:** RCON is only active when hosting a multiplayer game (even solo).
 > In Factorio: **Play → Multiplayer → Host new game** or **Host saved game**.
 
+### 2b. Configure Mod Settings (Optional)
+
+In **Settings → Mod Settings → Map**, you can configure:
+- **RCON Password** - Must match what you set in "The rest" settings
+- **RCON Port** - Must match `local-rcon-socket` port
+- **Observation Interval** - How often to write game state (default: 60 ticks = 1 second)
+- **Max Entities** - Limit entities per observation for performance
+
 <details>
 <summary>Alternative: Edit config.ini directly</summary>
 

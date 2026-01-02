@@ -140,8 +140,13 @@ local function get_entity_state(entity)
     return state
 end
 
+local function get_max_entities()
+    return settings.global["gamerl-max-entities"].value
+end
+
 local function extract_entities(surface, force, bounds)
     local entities = {}
+    local max_entities = get_max_entities()
     local filter = {
         force = force,
         area = bounds and {{bounds.x_min, bounds.y_min}, {bounds.x_max, bounds.y_max}} or nil,
@@ -150,7 +155,7 @@ local function extract_entities(surface, force, bounds)
     for _, entity in pairs(surface.find_entities_filtered(filter)) do
         if entity.unit_number then  -- Only numbered entities
             table.insert(entities, get_entity_state(entity))
-            if #entities >= 1000 then break end  -- Limit for performance
+            if #entities >= max_entities then break end  -- Limit for performance
         end
     end
 
@@ -557,10 +562,13 @@ script.on_configuration_changed(function(data)
     end
 end)
 
--- Periodic observation writing (every second at 60 UPS)
-script.on_nth_tick(60, function(event)
-    if storage.gamerl and next(storage.gamerl.agents) then
-        local obs = extract_observation()
-        write_observation(obs)
+-- Periodic observation writing (configurable interval)
+script.on_event(defines.events.on_tick, function(event)
+    local interval = settings.global["gamerl-observation-interval"].value
+    if event.tick % interval == 0 then
+        if storage.gamerl and next(storage.gamerl.agents) then
+            local obs = extract_observation()
+            write_observation(obs)
+        end
     end
 end)
