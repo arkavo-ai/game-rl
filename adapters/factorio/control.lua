@@ -408,6 +408,141 @@ local function execute_action(agent_id, action)
         end
         return false, "Entity not found or not rotatable"
 
+    -- ========== COMBAT ACTIONS ==========
+
+    elseif action_type == "Attack" then
+        -- Attack enemy at position or nearest enemy
+        local position = action.position or action.Position
+        local target_type = action.target_type or action.TargetType  -- optional filter
+        local damage = action.damage or action.Damage or 100
+        local damage_type = action.damage_type or action.DamageType or "physical"
+
+        local target = nil
+        if position then
+            -- Find enemy at position
+            local enemies = surface.find_entities_filtered{
+                position = {position[1], position[2]},
+                force = "enemy",
+                limit = 1,
+            }
+            target = enemies[1]
+        else
+            -- Find nearest enemy to spawn point
+            local filter = {force = "enemy", limit = 1}
+            if target_type then
+                filter.type = target_type
+            end
+            local enemies = surface.find_entities_filtered(filter)
+            if #enemies > 0 then
+                target = surface.find_nearest_enemy{
+                    position = {0, 0},
+                    max_distance = 1000,
+                    force = force,
+                }
+            end
+        end
+
+        if target and target.valid then
+            target.damage(damage, force, damage_type)
+            return true, nil
+        else
+            return false, "No enemy target found"
+        end
+
+    elseif action_type == "AttackArea" then
+        -- Deal damage to all enemies in an area
+        local position = action.position or action.Position
+        local radius = action.radius or action.Radius or 5
+        local damage = action.damage or action.Damage or 50
+        local damage_type = action.damage_type or action.DamageType or "explosion"
+
+        if not position then
+            return false, "AttackArea requires position"
+        end
+
+        local enemies = surface.find_entities_filtered{
+            position = {position[1], position[2]},
+            radius = radius,
+            force = "enemy",
+        }
+
+        local count = 0
+        for _, enemy in pairs(enemies) do
+            if enemy.valid and enemy.health then
+                enemy.damage(damage, force, damage_type)
+                count = count + 1
+            end
+        end
+
+        return count > 0, count > 0 and nil or "No enemies in area"
+
+    elseif action_type == "DestroyEnemy" then
+        -- Instantly destroy an enemy (for testing/cheats)
+        local position = action.position or action.Position
+
+        if not position then
+            return false, "DestroyEnemy requires position"
+        end
+
+        local enemies = surface.find_entities_filtered{
+            position = {position[1], position[2]},
+            force = "enemy",
+            limit = 1,
+        }
+
+        if #enemies > 0 and enemies[1].valid then
+            enemies[1].destroy()
+            return true, nil
+        else
+            return false, "No enemy at position"
+        end
+
+    elseif action_type == "SpawnEnemy" then
+        -- Spawn an enemy unit (for testing)
+        local position = action.position or action.Position
+        local enemy_type = action.enemy_type or action.EnemyType or "small-biter"
+
+        if not position then
+            return false, "SpawnEnemy requires position"
+        end
+
+        local entity = surface.create_entity{
+            name = enemy_type,
+            position = {position[1], position[2]},
+            force = "enemy",
+        }
+
+        return entity ~= nil, entity and nil or "Failed to spawn enemy"
+
+    elseif action_type == "BuildTurret" then
+        -- Convenience action for building defensive turrets
+        local position = action.position or action.Position
+        local turret_type = action.turret_type or action.TurretType or "gun-turret"
+        local direction = action.direction or action.Direction or 0
+
+        if not position then
+            return false, "BuildTurret requires position"
+        end
+
+        local can_place = surface.can_place_entity{
+            name = turret_type,
+            position = {position[1], position[2]},
+            direction = direction,
+            force = force,
+        }
+
+        if can_place then
+            local entity = surface.create_entity{
+                name = turret_type,
+                position = {position[1], position[2]},
+                direction = direction,
+                force = force,
+            }
+            return entity ~= nil, entity and nil or "Failed to build turret"
+        else
+            return false, "Cannot place turret at position"
+        end
+
     else
         return false, "Unknown action type: " .. tostring(action_type)
     end
