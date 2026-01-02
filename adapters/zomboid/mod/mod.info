@@ -1,6 +1,6 @@
 name=Arkavo Game-RL
 id=GameRL
 poster=poster.png
-description=AI/RL framework integration for Project Zomboid. Enables external agents to control survivors via Model Context Protocol (MCP). Connect with Claude Code for natural language survivor management.
+description=AI/RL framework integration for Project Zomboid. Enables external agents to control survivors via Model Context Protocol (MCP). Connect with Claude Code for natural language survivor management. [Tested: macOS | Untested: Windows, SteamOS/Linux] SETUP: 1) Install Claude Code from https://claude.ai/code 2) Load a game 3) Run: mkdir -p ~/arkavo-zomboid && cd ~/arkavo-zomboid && claude mcp add game-rl -- [path-to-game-rl-server] && claude. Windows: $env:ProgramFiles\Steam\steamapps\workshop\content\108600\3637032835\bin\windows\game-rl-server.exe | macOS: ~/Library/Application Support/Steam/steamapps/workshop/content/108600/3637032835/bin/macos/game-rl-server | Linux: ~/.steam/steam/steamapps/workshop/content/108600/3637032835/bin/linux/game-rl-server
 url=https://github.com/arkavo-ai/game-rl
 modversion=0.5.0
