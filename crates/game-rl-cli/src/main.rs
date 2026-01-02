@@ -1,7 +1,7 @@
 //! Game-RL MCP Server
 //!
 //! Unified server that auto-detects which game is running:
-//! - RimWorld via Unix socket (/tmp/arkavo_game_mcp.sock)
+//! - RimWorld via Unix socket (/tmp/gamerl-rimworld.sock)
 //! - Project Zomboid via file IPC (~/Zomboid/Lua/gamerl_status.json)
 
 use anyhow::Result;
@@ -19,7 +19,7 @@ enum DetectedGame {
     Zomboid(ZomboidBridge),
 }
 
-const RIMWORLD_SOCKET: &str = "/tmp/arkavo_game_mcp.sock";
+const RIMWORLD_SOCKET: &str = "/tmp/gamerl-rimworld.sock";
 
 /// Run the MCP server with a game bridge
 async fn run_with_bridge<E: GameEnvironment>(bridge: E) -> Result<()> {
