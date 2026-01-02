@@ -6,6 +6,6 @@
     "contact": "info@arkavo.com",
     "homepage": "https://github.com/arkavo-ai/game-rl",
     "factorio_version": "2.0",
-    "description": "Multi-agent reinforcement learning infrastructure for Factorio. Enables AI agents to observe game state, execute actions, and train policies for factory optimization, automation, and combat scenarios. SETUP: Enable RCON in config.ini (local-rcon-socket=127.0.0.1:27015, local-rcon-password=gamerl) then host a multiplayer game.",
+    "description": "Multi-agent reinforcement learning infrastructure for Factorio. Enables AI agents to observe game state, execute actions, and train policies. SETUP: In main menu, Ctrl+Alt+Settings (Cmd+Option on Mac) → The rest → set local-rcon-socket=127.0.0.1:27015 and local-rcon-password=gamerl → then host multiplayer.",
     "dependencies": ["base >= 2.0"]
 }

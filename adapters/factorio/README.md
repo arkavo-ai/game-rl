@@ -29,23 +29,34 @@ copy adapters\factorio %APPDATA%\Factorio\mods\gamerl_0.5.0
 
 ### 2. Enable RCON
 
-Edit your Factorio config to enable RCON for interactive play:
+In Factorio's **main menu**, access the hidden settings:
 
-**macOS:** `~/Library/Application Support/factorio/config/config.ini`
-**Linux:** `~/.factorio/config/config.ini`
-**Windows:** `%APPDATA%\Factorio\config-path.cfg` (points to config location)
+| Platform | How to open |
+|----------|-------------|
+| **Windows/Linux** | Hold **Ctrl+Alt** and click **Settings** |
+| **macOS** | Hold **Cmd+Option** and click **Settings** |
 
-Find these lines and update them:
-```ini
-; Socket to host RCON on when launching MP server from the menu.
-local-rcon-socket=127.0.0.1:27015
-
-; Password for RCON when launching MP server from the menu.
-local-rcon-password=gamerl
-```
+Then:
+1. Go to the **"The rest"** tab
+2. Set `local-rcon-socket` = `127.0.0.1:27015`
+3. Set `local-rcon-password` = `gamerl`
+4. Click OK
 
 > **Note:** RCON is only active when hosting a multiplayer game (even solo).
 > In Factorio: **Play → Multiplayer → Host new game** or **Host saved game**.
+
+<details>
+<summary>Alternative: Edit config.ini directly</summary>
+
+**macOS:** `~/Library/Application Support/factorio/config/config.ini`
+**Linux:** `~/.factorio/config/config.ini`
+**Windows:** `%APPDATA%\Factorio\config\config.ini`
+
+```ini
+local-rcon-socket=127.0.0.1:27015
+local-rcon-password=gamerl
+```
+</details>
 
 ### 3. Start Claude Code with Game-RL
 
