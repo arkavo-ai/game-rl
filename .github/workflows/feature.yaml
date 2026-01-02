@@ -81,3 +81,25 @@ jobs:
             $proc.Kill()
           }
           Write-Host "Smoke test passed: binary executes"
+
+      # Upload release binaries as artifacts
+      - name: Upload binary (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-rl-server-linux
+          path: target/release/game-rl-server
+
+      - name: Upload binary (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-rl-server-macos
+          path: target/release/game-rl-server
+
+      - name: Upload binary (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-rl-server-windows
+          path: target/release/game-rl-server.exe

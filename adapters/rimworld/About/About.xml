@@ -28,7 +28,7 @@ SETUP (macOS):
 3. Run each line in Terminal:
    mkdir -p ~/arkavo-rimworld
    cd ~/arkavo-rimworld
-   claude mcp add game-rl -- "$HOME/Library/Application Support/Steam/steamapps/workshop/content/294100/3634065510/bin/macos/harmony-server" /tmp/gamerl-rimworld.sock
+   claude mcp add game-rl -- "$HOME/Library/Application Support/Steam/steamapps/workshop/content/294100/3634065510/bin/macos/game-rl-server"
    claude
 4. Ask Claude: What's the colony status?
 
