@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use game_rl_core::{
-    Action, AgentConfig, AgentId, AgentManifest, AgentType, GameEvent, Observation, Result,
-    StepResult, StreamDescriptor,
+    Action, AgentConfig, AgentId, AgentManifest, AgentType, GameEvent, GameManifest, Observation,
+    Result, StepResult, StreamDescriptor,
 };
 use tokio::sync::broadcast;
 
@@ -58,6 +58,9 @@ pub trait GameEnvironment: Send + Sync + 'static {
 
     /// Called when environment should shut down
     async fn shutdown(&mut self) -> Result<()>;
+
+    /// Get the game manifest describing capabilities
+    fn manifest(&self) -> GameManifest;
 
     /// Subscribe to pushed state updates from the game.
     /// Returns None if push is not supported.

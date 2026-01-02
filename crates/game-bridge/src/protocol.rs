@@ -1,11 +1,13 @@
-//! Wire protocol for Rust <-> C# communication
+//! Wire protocol for Rust <-> game communication
 //!
 //! Messages are serialized as JSON with internally-tagged enums.
 //! Format: {"Type": "MessageType", ...fields}
 //!
 //! Uses PascalCase throughout for LLM-friendly natural language readability.
 
-use game_rl_core::{Action, AgentConfig, AgentId, AgentType, GameEvent, Observation, StreamDescriptor};
+use game_rl_core::{
+    Action, AgentConfig, AgentId, AgentType, GameEvent, Observation, StreamDescriptor,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -24,14 +26,14 @@ pub struct StepResultPayload {
     pub state_hash: Option<String>,
 }
 
-/// Messages sent between Rust bridge and C# game
+/// Messages sent between Rust bridge and game process
 ///
 /// Note: `rename_all` on enums only affects variant names, not field names inside variants.
 /// Each field must be explicitly renamed using `#[serde(rename = "...")]` for PascalCase.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "Type", rename_all = "PascalCase")]
 pub enum GameMessage {
-    // === C# -> Rust ===
+    // === Game -> Rust ===
     /// Game is ready and provides manifest
     Ready {
         #[serde(rename = "Name")]
@@ -104,7 +106,7 @@ pub enum GameMessage {
         message: String,
     },
 
-    // === Rust -> C# ===
+    // === Rust -> Game ===
     /// Register an agent
     RegisterAgent {
         #[serde(rename = "AgentId")]
@@ -201,29 +203,27 @@ mod tests {
     }
 
     #[test]
-    fn test_ready_from_csharp() {
-        // Exact JSON from C# logs
-        let json = r#"{"Type":"Ready","Name":"RimWorld","Version":"1.6.4633","Capabilities":{"MultiAgent":true,"MaxAgents":8,"Deterministic":true,"Headless":false}}"#;
-        println!("Testing JSON: {}", json);
-        println!("JSON length: {}", json.len());
+    fn test_ready_from_game() {
+        // Exact JSON format expected from games
+        let json = r#"{"Type":"Ready","Name":"ProjectZomboid","Version":"41.78","Capabilities":{"MultiAgent":true,"MaxAgents":8,"Deterministic":false,"Headless":false}}"#;
 
         let result: Result<GameMessage, _> = serde_json::from_str(json);
         match result {
-            Ok(msg) => {
-                println!("Deserialized successfully: {:?}", msg);
-                match msg {
-                    GameMessage::Ready { name, version, capabilities } => {
-                        assert_eq!(name, "RimWorld");
-                        assert_eq!(version, "1.6.4633");
-                        assert!(capabilities.multi_agent);
-                        assert_eq!(capabilities.max_agents, 8);
-                    }
-                    _ => panic!("Wrong message type"),
+            Ok(msg) => match msg {
+                GameMessage::Ready {
+                    name,
+                    version,
+                    capabilities,
+                } => {
+                    assert_eq!(name, "ProjectZomboid");
+                    assert_eq!(version, "41.78");
+                    assert!(capabilities.multi_agent);
+                    assert_eq!(capabilities.max_agents, 8);
+                    assert!(!capabilities.deterministic);
                 }
-            }
-            Err(e) => {
-                panic!("Deserialization failed: {}", e);
-            }
+                _ => panic!("Wrong message type"),
+            },
+            Err(e) => panic!("Deserialization failed: {}", e),
         }
     }
 
@@ -233,14 +233,11 @@ mod tests {
         let bytes = serialize(&msg).unwrap();
         let json = String::from_utf8_lossy(&bytes);
 
-        // Should be JSON with Type field in PascalCase
-        println!("GetStateHash json: {}", json);
-        assert!(json.contains("\"Type\":\"GetStateHash\""), "Should contain Type field in PascalCase");
+        assert!(json.contains("\"Type\":\"GetStateHash\""));
 
-        // Verify it can roundtrip
         let decoded: GameMessage = deserialize(&bytes).unwrap();
         match decoded {
-            GameMessage::GetStateHash => {},
+            GameMessage::GetStateHash => {}
             _ => panic!("Wrong message type"),
         }
     }

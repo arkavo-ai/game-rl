@@ -159,7 +159,11 @@ impl Notification {
     }
 
     /// Create a state update notification
-    pub fn state_update(tick: u64, state: serde_json::Value, events: Vec<game_rl_core::GameEvent>) -> Self {
+    pub fn state_update(
+        tick: u64,
+        state: serde_json::Value,
+        events: Vec<game_rl_core::GameEvent>,
+    ) -> Self {
         Self {
             jsonrpc: "2.0".to_string(),
             method: "notifications/game/stateUpdate".to_string(),

@@ -110,7 +110,10 @@ mod tests {
         let action: Action = serde_json::from_str(json).unwrap();
 
         match &action {
-            Action::Parameterized { action_type, params } => {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
                 assert_eq!(action_type, "set_work_priority");
                 assert_eq!(params.get("colonist_id").unwrap(), "Human917");
                 assert_eq!(params.get("work_type").unwrap(), "Hunting");
@@ -122,9 +125,18 @@ mod tests {
         // Verify serialization preserves flat format with PascalCase Type
         let serialized = serde_json::to_string(&action).unwrap();
         println!("Serialized: {}", serialized);
-        assert!(serialized.contains("\"Type\":\"set_work_priority\""), "Should have PascalCase Type field");
-        assert!(serialized.contains("\"colonist_id\":\"Human917\""), "Should have flat colonist_id");
-        assert!(!serialized.contains("\"params\":"), "Should NOT have nested params");
+        assert!(
+            serialized.contains("\"Type\":\"set_work_priority\""),
+            "Should have PascalCase Type field"
+        );
+        assert!(
+            serialized.contains("\"colonist_id\":\"Human917\""),
+            "Should have flat colonist_id"
+        );
+        assert!(
+            !serialized.contains("\"params\":"),
+            "Should NOT have nested params"
+        );
     }
 
     #[test]
@@ -133,7 +145,10 @@ mod tests {
         let action: Action = serde_json::from_str(json).unwrap();
 
         match &action {
-            Action::Parameterized { action_type, params } => {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
                 assert_eq!(action_type, "wait");
                 assert!(params.is_empty());
             }

@@ -1,0 +1,6 @@
+name=Arkavo Game-RL
+id=GameRL
+poster=poster.png
+description=AI/RL framework integration for Project Zomboid. Enables external agents to control survivors via Model Context Protocol (MCP). Connect with Claude Code for natural language survivor management.
+url=https://github.com/arkavo-ai/game-rl
+modversion=0.5.0

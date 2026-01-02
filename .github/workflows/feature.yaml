@@ -1,0 +1,105 @@
+name: Feature Branch CI
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - 'adapters/**/*.lua'
+      - 'adapters/**/*.xml'
+      - 'adapters/**/*.json'
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Build all crates
+        run: cargo build --workspace
+
+      - name: Run clippy
+        run: cargo clippy --workspace -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      # Smoke test: build release binary and verify it runs
+      - name: Build release binary
+        run: cargo build --release -p game-rl-cli
+
+      - name: Smoke test - binary runs (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          test -f target/release/game-rl-server
+          # Binary should start and wait for game (timeout after 2s is expected)
+          timeout 2 target/release/game-rl-server 2>&1 || true
+          echo "Smoke test passed: binary executes"
+
+      - name: Smoke test - binary runs (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (!(Test-Path target/release/game-rl-server.exe)) {
+            throw "Binary not found"
+          }
+          # Start process and kill after 2 seconds (binary waits for game)
+          $proc = Start-Process -FilePath "target/release/game-rl-server.exe" -PassThru -NoNewWindow
+          Start-Sleep -Seconds 2
+          if (!$proc.HasExited) {
+            $proc.Kill()
+          }
+          Write-Host "Smoke test passed: binary executes"
+
+      # Upload release binaries as artifacts
+      - name: Upload binary (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-rl-server-linux
+          path: target/release/game-rl-server
+
+      - name: Upload binary (macOS)
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-rl-server-macos
+          path: target/release/game-rl-server
+
+      - name: Upload binary (Windows)
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: game-rl-server-windows
+          path: target/release/game-rl-server.exe

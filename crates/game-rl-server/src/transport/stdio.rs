@@ -30,8 +30,8 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>) -> Result<()> {
 
     // Spawn event forwarder task if push is supported
     let stdout_for_events = stdout.clone();
-    let _event_task = if let Some(mut rx) = event_rx {
-        Some(tokio::spawn(async move {
+    let _event_task = event_rx.map(|mut rx| {
+        tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(update) => {
@@ -69,10 +69,8 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>) -> Result<()> {
                     }
                 }
             }
-        }))
-    } else {
-        None
-    };
+        })
+    });
 
     loop {
         line.clear();
@@ -109,11 +107,9 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>) -> Result<()> {
 
         {
             let mut out = stdout.lock().await;
-            out.write_all(response_json.as_bytes())
-                .await
-                .map_err(|e| {
-                    game_rl_core::GameRLError::IpcError(format!("Failed to write stdout: {}", e))
-                })?;
+            out.write_all(response_json.as_bytes()).await.map_err(|e| {
+                game_rl_core::GameRLError::IpcError(format!("Failed to write stdout: {}", e))
+            })?;
             out.write_all(b"\n").await.map_err(|e| {
                 game_rl_core::GameRLError::IpcError(format!("Failed to write newline: {}", e))
             })?;

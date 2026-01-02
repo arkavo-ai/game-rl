@@ -68,7 +68,7 @@ impl Default for GameManifest {
         Self {
             name: "Unknown".into(),
             version: "0.0.0".into(),
-            game_rl_version: "1.0.0".into(),
+            game_rl_version: env!("CARGO_PKG_VERSION").into(),
             capabilities: Default::default(),
             default_observation_space: None,
             default_action_space: None,

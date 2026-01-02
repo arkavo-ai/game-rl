@@ -1,6 +1,6 @@
 [package]
-name = "harmony-bridge"
-description = "Bridge between Rust MCP server and .NET games via Harmony"
+name = "zomboid-bridge"
+description = "Bridge between Rust MCP server and Project Zomboid via Lua mod"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true

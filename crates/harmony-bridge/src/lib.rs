@@ -2,11 +2,15 @@
 //!
 //! This crate provides:
 //! - IPC communication with .NET games (Unix sockets / named pipes)
-//! - Wire protocol for game state and action exchange
+//! - Wire protocol for game state and action exchange (via game-bridge)
 //! - GameEnvironment implementation that proxies to the .NET game
 
 pub mod ipc;
-pub mod protocol;
 
+// Re-export protocol types from game-bridge for backward compatibility
+pub mod protocol {
+    pub use game_bridge::protocol::*;
+}
+
+pub use game_bridge::GameMessage;
 pub use ipc::HarmonyBridge;
-pub use protocol::GameMessage;

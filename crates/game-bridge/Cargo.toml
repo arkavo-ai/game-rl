@@ -1,6 +1,6 @@
 [package]
-name = "harmony-bridge"
-description = "Bridge between Rust MCP server and .NET games via Harmony"
+name = "game-bridge"
+description = "Shared bridge infrastructure for game-rl adapters"
 readme = "README.md"
 version.workspace = true
 edition.workspace = true
@@ -12,9 +12,12 @@ authors.workspace = true
 [dependencies]
 game-rl-core = { workspace = true }
 game-rl-server = { workspace = true }
-game-bridge = { workspace = true }
 tokio = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+anyhow = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
+
+[dev-dependencies]
+mlua = { version = "0.10", features = ["lua51", "vendored"] }

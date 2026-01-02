@@ -1,18 +1,21 @@
 //! IPC communication with .NET games
 
-use crate::protocol::{GameCapabilities, GameMessage, StepResultPayload, deserialize, serialize};
 use async_trait::async_trait;
+#[cfg(unix)]
+use game_bridge::reader_task;
+#[cfg(unix)]
+use game_bridge::unix::{UnixReadWrapper, UnixWriteWrapper};
+use game_bridge::{AsyncWriter, GameCapabilities, GameMessage, StepResultPayload, serialize};
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, GameManifest, GameRLError, Observation,
     Result, StepResult, StreamDescriptor,
 };
-use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
+use game_rl_server::environment::StateUpdate;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 /// Bridge to a .NET game via IPC
 pub struct HarmonyBridge {
@@ -32,18 +35,6 @@ pub struct HarmonyBridge {
     game_version: String,
     /// Background reader task handle
     _reader_handle: Option<tokio::task::JoinHandle<()>>,
-}
-
-/// Trait for async reading
-#[async_trait]
-trait AsyncReader: Send {
-    async fn read_message(&mut self) -> Result<Vec<u8>>;
-}
-
-/// Trait for async writing
-#[async_trait]
-trait AsyncWriter: Send + Sync {
-    async fn write_message(&mut self, data: &[u8]) -> Result<()>;
 }
 
 impl HarmonyBridge {
@@ -100,43 +91,46 @@ impl HarmonyBridge {
             self._reader_handle = Some(handle);
         }
 
-        #[cfg(windows)]
+        #[cfg(not(unix))]
         {
-            return Err(GameRLError::IpcError(
-                "Windows named pipes not yet implemented".into(),
-            ));
+            Err(GameRLError::IpcError(
+                "Only Unix sockets are supported (Windows named pipes not yet implemented)".into(),
+            ))
         }
 
-        // Wait for Ready message by sending a dummy request that expects Ready
-        // The reader task will handle routing the response
-        let (response_tx, response_rx) = oneshot::channel();
-        // Send an empty marker - the first message from the game is Ready
-        self.request_tx
-            .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
-            .await
-            .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
+        #[cfg(unix)]
+        {
+            // Wait for Ready message by sending a dummy request that expects Ready
+            // The reader task will handle routing the response
+            let (response_tx, response_rx) = oneshot::channel();
+            // Send an empty marker - the first message from the game is Ready
+            self.request_tx
+                .send((GameMessage::GetStateHash, response_tx)) // Dummy, reader handles Ready specially
+                .await
+                .map_err(|_| GameRLError::IpcError("Failed to send to reader task".into()))?;
 
-        // Wait for Ready response
-        let msg = response_rx
-            .await
-            .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
+            // Wait for Ready response
+            let msg = response_rx
+                .await
+                .map_err(|_| GameRLError::IpcError("Reader task died".into()))??;
 
-        match msg {
-            GameMessage::Ready {
-                name,
-                version,
-                capabilities,
-            } => {
-                info!("Connected to {} v{}", name, version);
-                self.game_name = name;
-                self.game_version = version;
-                self.capabilities = Some(capabilities);
-                Ok(())
+            match msg {
+                GameMessage::Ready {
+                    name,
+                    version,
+                    capabilities,
+                } => {
+                    info!("Connected to {} v{}", name, version);
+                    self.game_name = name;
+                    self.game_version = version;
+                    self.capabilities = Some(capabilities);
+                    Ok(())
+                }
+                _ => Err(GameRLError::ProtocolError(format!(
+                    "Expected Ready message, got {:?}",
+                    msg
+                ))),
             }
-            _ => Err(GameRLError::ProtocolError(format!(
-                "Expected Ready message, got {:?}",
-                msg
-            ))),
         }
     }
 
@@ -181,30 +175,6 @@ impl HarmonyBridge {
             .as_mut()
             .ok_or_else(|| GameRLError::IpcError("Not connected".into()))?;
         writer.write_message(&data).await
-    }
-
-    /// Get game manifest from capabilities
-    pub fn manifest(&self) -> GameManifest {
-        let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
-            multi_agent: false,
-            max_agents: 1,
-            deterministic: false,
-            headless: false,
-        });
-
-        GameManifest {
-            name: self.game_name.clone(),
-            version: self.game_version.clone(),
-            game_rl_version: "1.0.0".into(),
-            capabilities: game_rl_core::Capabilities {
-                multi_agent: caps.multi_agent,
-                max_agents: caps.max_agents,
-                deterministic: caps.deterministic,
-                headless: caps.headless,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
     }
 }
 
@@ -374,142 +344,30 @@ impl GameEnvironment for HarmonyBridge {
         Ok(())
     }
 
-    fn subscribe_events(&self) -> Option<broadcast::Receiver<StateUpdate>> {
-        Some(self.event_tx.subscribe())
-    }
-}
+    fn manifest(&self) -> GameManifest {
+        let caps = self.capabilities.clone().unwrap_or(GameCapabilities {
+            multi_agent: false,
+            max_agents: 1,
+            deterministic: false,
+            headless: false,
+        });
 
-/// Background reader task that handles incoming messages
-async fn reader_task<R: AsyncReader>(
-    mut reader: R,
-    mut request_rx: mpsc::Receiver<(GameMessage, oneshot::Sender<Result<GameMessage>>)>,
-    event_tx: broadcast::Sender<StateUpdate>,
-) {
-    // Queue of pending response channels (FIFO - responses come in order)
-    let mut pending: Vec<oneshot::Sender<Result<GameMessage>>> = Vec::new();
-
-    loop {
-        tokio::select! {
-            // New request from main task
-            req = request_rx.recv() => {
-                match req {
-                    Some((_msg, response_tx)) => {
-                        pending.push(response_tx);
-                    }
-                    None => {
-                        // Channel closed, exit
-                        debug!("Request channel closed, reader task exiting");
-                        break;
-                    }
-                }
-            }
-
-            // Message from game
-            msg_result = reader.read_message() => {
-                match msg_result {
-                    Ok(data) => {
-                        // Log incoming message
-                        let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-                        debug!("[C#→Rust] len={} json={}", data.len(), json_preview);
-
-                        match deserialize(&data) {
-                            Ok(msg) => {
-                                match msg {
-                                    // Push notification - broadcast to subscribers
-                                    GameMessage::StateUpdate { tick, state, events } => {
-                                        let update = StateUpdate {
-                                            tick,
-                                            state,
-                                            events,
-                                        };
-                                        // Ignore send errors (no subscribers)
-                                        let _ = event_tx.send(update);
-                                    }
-
-                                    // Response to a pending request
-                                    _ => {
-                                        if let Some(response_tx) = pending.pop() {
-                                            let _ = response_tx.send(Ok(msg));
-                                        } else {
-                                            warn!("Received response but no pending request: {:?}", msg);
-                                        }
-                                    }
-                                }
-                            }
-                            Err(e) => {
-                                error!("Failed to deserialize message: {}", e);
-                                // Send error to pending request if any
-                                if let Some(response_tx) = pending.pop() {
-                                    let _ = response_tx.send(Err(GameRLError::SerializationError(e.to_string())));
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Reader task failed: {}", e);
-                        // Notify all pending requests of failure
-                        for response_tx in pending.drain(..) {
-                            let _ = response_tx.send(Err(GameRLError::IpcError("Connection lost".into())));
-                        }
-                        break;
-                    }
-                }
-            }
+        GameManifest {
+            name: self.game_name.clone(),
+            version: self.game_version.clone(),
+            game_rl_version: env!("CARGO_PKG_VERSION").into(),
+            capabilities: game_rl_core::Capabilities {
+                multi_agent: caps.multi_agent,
+                max_agents: caps.max_agents,
+                deterministic: caps.deterministic,
+                headless: caps.headless,
+                ..Default::default()
+            },
+            ..Default::default()
         }
     }
-}
 
-// Unix read wrapper (for split stream)
-#[cfg(unix)]
-struct UnixReadWrapper(tokio::net::unix::OwnedReadHalf);
-
-#[cfg(unix)]
-#[async_trait]
-impl AsyncReader for UnixReadWrapper {
-    async fn read_message(&mut self) -> Result<Vec<u8>> {
-        // No timeout - wait indefinitely for messages.
-        // Dead connections are detected via socket close/EOF.
-        // This supports both request/response and push events.
-
-        // Read length-prefixed message
-        let mut len_bytes = [0u8; 4];
-        self.0
-            .read_exact(&mut len_bytes)
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Read length failed: {}", e)))?;
-        let len = u32::from_le_bytes(len_bytes) as usize;
-
-        let mut data = vec![0u8; len];
-        self.0
-            .read_exact(&mut data)
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Read data failed: {}", e)))?;
-
-        Ok(data)
-    }
-}
-
-// Unix write wrapper (for split stream)
-#[cfg(unix)]
-struct UnixWriteWrapper(tokio::net::unix::OwnedWriteHalf);
-
-#[cfg(unix)]
-#[async_trait]
-impl AsyncWriter for UnixWriteWrapper {
-    async fn write_message(&mut self, data: &[u8]) -> Result<()> {
-        let len = (data.len() as u32).to_le_bytes();
-        self.0
-            .write_all(&len)
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Write length failed: {}", e)))?;
-        self.0
-            .write_all(data)
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Write data failed: {}", e)))?;
-        self.0
-            .flush()
-            .await
-            .map_err(|e| GameRLError::IpcError(format!("Flush failed: {}", e)))?;
-        Ok(())
+    fn subscribe_events(&self) -> Option<broadcast::Receiver<StateUpdate>> {
+        Some(self.event_tx.subscribe())
     }
 }
