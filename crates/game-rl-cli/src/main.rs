@@ -122,10 +122,10 @@ async fn main() -> Result<()> {
         }
 
         if candidates.is_empty() {
-            info!(
-                "Waiting for game... (RimWorld: {}, Zomboid: {:?}, Factorio: {})",
-                RIMWORLD_SOCKET, zomboid_response, FACTORIO_RCON_ADDR
-            );
+            info!("Waiting for game connection...");
+            info!("  RimWorld: socket at {}", RIMWORLD_SOCKET);
+            info!("  Zomboid:  file at {:?}", zomboid_response);
+            info!("  Factorio: RCON at {} (enable in config.ini, host multiplayer)", FACTORIO_RCON_ADDR);
         } else {
             info!("No game connected successfully, retrying...");
         }

@@ -2,18 +2,20 @@
 
 Multi-agent RL training infrastructure for Factorio 2.0.
 
-## Requirements
-
-- Factorio 2.0.72 or later
-- Factorio headless server (for training)
-- game-rl CLI
-
-## Installation
+## Quick Start (Interactive Play)
 
 ### 1. Install the Mod
 
-Copy the `factorio` folder to your Factorio mods directory:
+**Option A: Symlink (for development)**
+```bash
+# macOS
+ln -s "$(pwd)/adapters/factorio" ~/Library/Application\ Support/factorio/mods/gamerl_0.5.0
 
+# Linux
+ln -s "$(pwd)/adapters/factorio" ~/.factorio/mods/gamerl_0.5.0
+```
+
+**Option B: Copy**
 ```bash
 # macOS
 cp -r adapters/factorio ~/Library/Application\ Support/factorio/mods/gamerl_0.5.0
@@ -25,86 +27,96 @@ cp -r adapters/factorio ~/.factorio/mods/gamerl_0.5.0
 copy adapters\factorio %APPDATA%\Factorio\mods\gamerl_0.5.0
 ```
 
-Or create a symlink for development:
+### 2. Enable RCON
 
-```bash
-# macOS
-ln -s "$(pwd)/adapters/factorio" ~/Library/Application\ Support/factorio/mods/gamerl_0.5.0
+Edit your Factorio config to enable RCON for interactive play:
 
-# Linux
-ln -s "$(pwd)/adapters/factorio" ~/.factorio/mods/gamerl_0.5.0
+**macOS:** `~/Library/Application Support/factorio/config/config.ini`
+**Linux:** `~/.factorio/config/config.ini`
+**Windows:** `%APPDATA%\Factorio\config-path.cfg` (points to config location)
+
+Find these lines and update them:
+```ini
+; Socket to host RCON on when launching MP server from the menu.
+local-rcon-socket=127.0.0.1:27015
+
+; Password for RCON when launching MP server from the menu.
+local-rcon-password=gamerl
 ```
 
-### 2. Configure Headless Server
+> **Note:** RCON is only active when hosting a multiplayer game (even solo).
+> In Factorio: **Play → Multiplayer → Host new game** or **Host saved game**.
 
-Create a server configuration with RCON enabled:
+### 3. Start Claude Code with Game-RL
 
 ```bash
-# Create server settings
-cat > server-settings.json << 'EOF'
-{
-    "name": "GameRL Training",
-    "description": "RL training server",
-    "visibility": {"public": false, "lan": false},
-    "require_user_verification": false,
-    "autosave_interval": 0,
-    "autosave_slots": 1
-}
-EOF
+# Add the MCP server (one time)
+claude mcp add game-rl -- cargo run -p game-rl-cli --release
+
+# Start Claude Code
+claude
 ```
 
-### 3. Start Factorio with RCON
+### 4. Play!
+
+Start Factorio, host a multiplayer game (can be solo), and Claude can now observe and interact with your factory.
+
+---
+
+## Headless Server (Training)
+
+For RL training without GUI:
 
 ```bash
-# Start headless server
-./factorio --start-server save.zip \
+# Start headless server with RCON
+factorio --start-server save.zip \
     --rcon-port 27015 \
-    --rcon-password gamerl \
-    --server-settings server-settings.json
+    --rcon-password gamerl
 
-# Or with the GUI for debugging
-./factorio --load save.zip \
+# Or with full paths on macOS:
+"/Users/$USER/Library/Application Support/Steam/steamapps/common/Factorio/factorio.app/Contents/MacOS/factorio" \
+    --start-server "/Users/$USER/Library/Application Support/factorio/saves/mysave.zip" \
     --rcon-port 27015 \
     --rcon-password gamerl
 ```
 
-### 4. Start the MCP Server
+---
+
+## Troubleshooting
+
+### "Waiting for game..." message
+
+The MCP server can't connect to Factorio. Check:
+
+1. **Is Factorio running?** Start the game first
+2. **Is RCON enabled?** Edit `config.ini` as shown above
+3. **Are you hosting multiplayer?** RCON only works in multiplayer mode
+4. **Is GameRL mod enabled?** Check Mods menu in Factorio
+
+### Test RCON manually
 
 ```bash
-cargo run --bin game-rl-cli -- --game factorio
+# Check if RCON port is open
+nc -zv 127.0.0.1 27015
+
+# If "Connection refused" - RCON is not enabled
+# If "succeeded" - RCON is working
 ```
 
-### 5. Connect with Claude Code
+### Check mod is loaded
 
-```bash
-claude mcp add --transport stdio game-rl -- /path/to/game-rl-cli --game factorio
+In Factorio console (~ key):
 ```
+/c rcon.print(remote.interfaces['gamerl'] and 'ok' or 'no')
+```
+
+---
 
 ## Usage
 
-### Register an Agent
-
-```lua
--- Via RCON
-/c remote.call("gamerl", "register_agent", "factory_1", "FactoryManager", {})
-```
-
-### Execute Actions
-
-```lua
--- Build an assembler
-/c remote.call("gamerl", "step", "factory_1", '{"type":"Build","entity":"assembling-machine-1","position":[10,20]}', 60)
-
--- Set recipe
-/c remote.call("gamerl", "step", "factory_1", '{"type":"SetRecipe","entity_id":123,"recipe":"iron-gear-wheel"}', 60)
-
--- Start research
-/c remote.call("gamerl", "step", "factory_1", '{"type":"StartResearch","technology":"automation-2"}', 60)
-```
-
 ### Observations
 
-Observations are written to `script-output/gamerl/observation.json`:
+The mod writes game state to `script-output/gamerl/observation.json`:
 
 ```json
 {
@@ -118,23 +130,13 @@ Observations are written to `script-output/gamerl/observation.json`:
         "factory_1": {
             "entities": [...],
             "resources": {"iron-ore": 10000, "copper-ore": 8000},
-            "enemies": [],
-            "reward": 1.5,
-            "reward_components": {"research_progress": 0.45, "power_satisfaction": 1.0}
+            "reward": 1.5
         }
     }
 }
 ```
 
-## Agent Types
-
-| Type | Description | Max Per Game |
-|------|-------------|--------------|
-| `FactoryManager` | High-level factory control | 1 |
-| `SectionController` | Controls a factory section | 8 |
-| `CombatController` | Military operations | 1 |
-
-## Action Types
+### Action Types
 
 | Action | Parameters | Description |
 |--------|------------|-------------|
@@ -145,29 +147,30 @@ Observations are written to `script-output/gamerl/observation.json`:
 | `StartResearch` | `technology` | Begin research |
 | `Noop` | (none) | Take no action |
 
-## Scenarios
+### Agent Types
 
-| Scenario | Description |
-|----------|-------------|
-| `factory_optimization` | Maximize science per minute |
-| `curriculum_mining` | Learn mining and smelting |
-| `curriculum_automation` | Build assembly lines |
-| `curriculum_logistics` | Set up belt networks |
-| `defense_wave` | Survive biter attacks |
+| Type | Description |
+|------|-------------|
+| `StrategyController` | High-level factory planning |
+| `ColonyManager` | Resource and logistics management |
+| `CombatDirector` | Military operations |
 
-## Deterministic Training
+---
 
-Factorio provides deterministic simulation when:
+## Architecture
 
-1. Using the same save file
-2. Same mod configuration
-3. Same action sequence
+```
+Claude Code ──MCP──► game-rl-server ──RCON──► Factorio
+                            │                    │
+                            │                    ▼
+                            ◄────file──── script-output/gamerl/observation.json
+```
 
-Use `get_state_hash` to verify determinism across runs.
+- **Commands:** Sent via RCON (`remote.call("gamerl", ...)`)
+- **Observations:** Written to file by the mod, read by the bridge
 
-## Performance Tips
+## Requirements
 
-1. Use headless mode for faster training
-2. Increase game speed: `game.speed = 10`
-3. Limit observation scope with `bounds`
-4. Use `tick_paused` + `ticks_to_run` for precise stepping
+- Factorio 2.0.72+
+- Rust toolchain (for building game-rl)
+- Claude Code
