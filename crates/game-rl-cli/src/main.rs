@@ -3,23 +3,28 @@
 //! Unified server that auto-detects which game is running:
 //! - RimWorld via Unix socket (/tmp/gamerl-rimworld.sock)
 //! - Project Zomboid via file IPC (~/Zomboid/Lua/gamerl_response.json)
+//! - Factorio via RCON (localhost:27015)
 
 use anyhow::Result;
+use factorio_bridge::{FactorioBridge, FactorioConfig};
 use game_rl_server::{GameEnvironment, GameRLServer};
 use harmony_bridge::HarmonyBridge;
 use std::path::Path;
 use std::time::Duration;
+use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tracing::{Level, info, warn};
+use tracing::{info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 use zomboid_bridge::{ZomboidBridge, ZomboidConfig};
 
 enum DetectedGame {
     RimWorld(HarmonyBridge),
     Zomboid(ZomboidBridge),
+    Factorio(FactorioBridge),
 }
 
 const RIMWORLD_SOCKET: &str = "/tmp/gamerl-rimworld.sock";
+const FACTORIO_RCON_ADDR: &str = "127.0.0.1:27015";
 
 /// Run the MCP server with a game bridge
 async fn run_with_bridge<E: GameEnvironment>(bridge: E) -> Result<()> {
@@ -44,6 +49,7 @@ async fn main() -> Result<()> {
     // Detection paths
     let zomboid_config = ZomboidConfig::default();
     let zomboid_response = zomboid_config.ipc_path.join("gamerl_response.json");
+    let factorio_config = FactorioConfig::default();
 
     // Auto-detect game
     let game = loop {
@@ -67,9 +73,19 @@ async fn main() -> Result<()> {
             }
         }
 
+        // Check Factorio RCON
+        if let Ok(_stream) = TcpStream::connect(FACTORIO_RCON_ADDR).await {
+            info!("Factorio RCON detected at {}", FACTORIO_RCON_ADDR);
+            let mut bridge = FactorioBridge::with_config(factorio_config.clone());
+            match bridge.init().await {
+                Ok(()) => break DetectedGame::Factorio(bridge),
+                Err(e) => warn!("Factorio RCON exists but init failed: {}", e),
+            }
+        }
+
         info!(
-            "Waiting for game... (RimWorld: {}, Zomboid: {:?})",
-            RIMWORLD_SOCKET, zomboid_response
+            "Waiting for game... (RimWorld: {}, Zomboid: {:?}, Factorio: {})",
+            RIMWORLD_SOCKET, zomboid_response, FACTORIO_RCON_ADDR
         );
         sleep(Duration::from_secs(2)).await;
     };
@@ -78,6 +94,7 @@ async fn main() -> Result<()> {
     match game {
         DetectedGame::RimWorld(bridge) => run_with_bridge(bridge).await?,
         DetectedGame::Zomboid(bridge) => run_with_bridge(bridge).await?,
+        DetectedGame::Factorio(bridge) => run_with_bridge(bridge).await?,
     }
 
     Ok(())

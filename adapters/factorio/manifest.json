@@ -1,0 +1,114 @@
+{
+    "name": "Factorio",
+    "version": "2.0.72",
+    "game_rl_version": "0.5.0",
+    "platform": "Lua",
+    "ipc": {
+        "type": "rcon_file_hybrid",
+        "rcon_port": 27015,
+        "observation_path": "script-output/gamerl/"
+    },
+    "capabilities": {
+        "multi_agent": true,
+        "max_agents": 8,
+        "deterministic": true,
+        "headless": true,
+        "save_replay": true,
+        "domain_randomization": true,
+        "variable_timestep": true
+    },
+    "agent_types": [
+        {
+            "name": "FactoryManager",
+            "description": "High-level factory control (build orders, research, logistics)",
+            "max_per_game": 1
+        },
+        {
+            "name": "SectionController",
+            "description": "Controls a specific factory section (smelting, production, etc)",
+            "max_per_game": 8
+        },
+        {
+            "name": "CombatController",
+            "description": "Military operations, defense, and biter management",
+            "max_per_game": 1
+        }
+    ],
+    "observation_profiles": {
+        "minimal": {
+            "description": "Core game metrics only (research, power, evolution)",
+            "estimated_size_kb": 1
+        },
+        "normal": {
+            "description": "Metrics + nearby entities within agent bounds",
+            "estimated_size_kb": 20
+        },
+        "full": {
+            "description": "Complete factory state with all entities",
+            "estimated_size_kb": 200
+        }
+    },
+    "scenarios": [
+        {
+            "name": "factory_optimization",
+            "description": "Maximize SPM from a starter base",
+            "reward_focus": ["throughput", "efficiency", "research_speed"],
+            "difficulty": "medium"
+        },
+        {
+            "name": "curriculum_mining",
+            "description": "Learn to mine and smelt ore",
+            "difficulty": "easy"
+        },
+        {
+            "name": "curriculum_automation",
+            "description": "Build basic assembly machines and belts",
+            "difficulty": "medium"
+        },
+        {
+            "name": "curriculum_logistics",
+            "description": "Set up belt networks and inserters",
+            "difficulty": "medium"
+        },
+        {
+            "name": "curriculum_research",
+            "description": "Complete research goals efficiently",
+            "difficulty": "medium"
+        },
+        {
+            "name": "defense_wave",
+            "description": "Survive escalating biter attacks",
+            "reward_focus": ["survival", "efficiency", "kill_ratio"],
+            "difficulty": "hard"
+        }
+    ],
+    "reward_components": [
+        {"name": "spm", "range": [0, 1000], "description": "Science per minute"},
+        {"name": "throughput", "range": [0, 100], "description": "Items/sec production rate"},
+        {"name": "research_progress", "range": [0, 1], "description": "Current research completion"},
+        {"name": "research_completed", "range": [0, 10], "description": "Bonus for completing research"},
+        {"name": "power_satisfaction", "range": [-1, 1], "description": "Power grid satisfaction ratio"},
+        {"name": "pollution_rate", "range": [-10, 0], "description": "Pollution generation penalty"},
+        {"name": "evolution_factor", "range": [-5, 0], "description": "Biter evolution penalty"},
+        {"name": "structure_damage", "range": [-100, 0], "description": "Damage to player structures"},
+        {"name": "biters_killed", "range": [0, 10], "description": "Combat success bonus"},
+        {"name": "efficiency_ratio", "range": [0, 1], "description": "Resource utilization efficiency"},
+        {"name": "idle_machines", "range": [-1, 0], "description": "Penalty for idle production"},
+        {"name": "logistics_bottleneck", "range": [-1, 0], "description": "Penalty for logistics issues"}
+    ],
+    "action_types": [
+        {"name": "Build", "description": "Place an entity at a position"},
+        {"name": "Mine", "description": "Remove an entity"},
+        {"name": "SetRecipe", "description": "Set recipe for assembling machine"},
+        {"name": "SetFilter", "description": "Set filter for inserter or container"},
+        {"name": "RotateEntity", "description": "Rotate an entity"},
+        {"name": "ConnectWire", "description": "Connect circuit wire between entities"},
+        {"name": "StartResearch", "description": "Begin researching a technology"},
+        {"name": "SetLogisticsRequest", "description": "Configure logistics request"},
+        {"name": "SetTrainSchedule", "description": "Configure train schedule"},
+        {"name": "LaunchRocket", "description": "Launch a rocket"},
+        {"name": "Noop", "description": "Take no action, just observe"}
+    ],
+    "tick_rate": 60,
+    "max_episode_ticks": 36000000
+}
