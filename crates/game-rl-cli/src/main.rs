@@ -15,7 +15,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tracing::{debug, info, warn, Level};
+use tracing::{Level, debug, info, warn};
 use tracing_subscriber::FmtSubscriber;
 use zomboid_bridge::{ZomboidBridge, ZomboidConfig};
 
@@ -90,7 +90,10 @@ async fn main() -> Result<()> {
 
         // Try to connect to each candidate in order of freshness
         for candidate in &candidates {
-            debug!("Trying {} (modified: {:?})", candidate.name, candidate.modified);
+            debug!(
+                "Trying {} (modified: {:?})",
+                candidate.name, candidate.modified
+            );
 
             match candidate.name {
                 "RimWorld" => {
@@ -125,7 +128,10 @@ async fn main() -> Result<()> {
             info!("Waiting for game connection...");
             info!("  RimWorld: socket at {}", RIMWORLD_SOCKET);
             info!("  Zomboid:  file at {:?}", zomboid_response);
-            info!("  Factorio: RCON at {} (enable in config.ini, host multiplayer)", FACTORIO_RCON_ADDR);
+            info!(
+                "  Factorio: RCON at {} (enable in config.ini, host multiplayer)",
+                FACTORIO_RCON_ADDR
+            );
         } else {
             info!("No game connected successfully, retrying...");
         }

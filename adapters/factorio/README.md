@@ -170,9 +170,10 @@ The mod writes game state to `script-output/gamerl/observation.json`:
 
 | Type | Description |
 |------|-------------|
-| `StrategyController` | High-level factory planning |
-| `ColonyManager` | Resource and logistics management |
-| `CombatDirector` | Military operations |
+| `Observer` | Watch game state without acting |
+| `Player` | Control player character directly |
+| `Controller` | High-level factory planning and logistics (recommended) |
+| `Director` | Event and scenario management |
 
 ---
 

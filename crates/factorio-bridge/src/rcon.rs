@@ -113,7 +113,7 @@ pub struct RconClient {
     /// Next packet ID
     next_id: AtomicI32,
     /// Whether authenticated
-    authenticated: bool,
+    authenticated: std::sync::atomic::AtomicBool,
 }
 
 impl RconClient {
@@ -124,12 +124,12 @@ impl RconClient {
             address: address.into(),
             password: password.into(),
             next_id: AtomicI32::new(1),
-            authenticated: false,
+            authenticated: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
     /// Connect and authenticate with the RCON server
-    pub async fn connect(&mut self) -> Result<()> {
+    pub async fn connect(&self) -> Result<()> {
         info!("Connecting to RCON at {}", self.address);
 
         let stream = TcpStream::connect(&self.address)
@@ -148,6 +148,7 @@ impl RconClient {
         let response = self.recv_packet().await?;
 
         if response.id == -1 {
+            self.authenticated.store(false, Ordering::SeqCst);
             return Err(GameRLError::IpcError(
                 "RCON authentication failed".to_string(),
             ));
@@ -160,20 +161,58 @@ impl RconClient {
             );
         }
 
-        self.authenticated = true;
+        self.authenticated.store(true, Ordering::SeqCst);
         info!("RCON authenticated successfully");
 
         Ok(())
     }
 
-    /// Check if connected and authenticated
-    pub fn is_connected(&self) -> bool {
-        self.authenticated
+    /// Reconnect if disconnected
+    async fn ensure_connected(&self) -> Result<()> {
+        if !self.authenticated.load(Ordering::SeqCst) {
+            info!("RCON disconnected, reconnecting...");
+            self.connect().await?;
+        }
+        Ok(())
     }
 
-    /// Execute a command and return the response
+    /// Mark as disconnected (call on error)
+    fn mark_disconnected(&self) {
+        self.authenticated.store(false, Ordering::SeqCst);
+    }
+
+    /// Check if connected and authenticated
+    pub fn is_connected(&self) -> bool {
+        self.authenticated.load(Ordering::SeqCst)
+    }
+
+    /// Execute a command and return the response (with auto-reconnect)
     pub async fn execute(&self, command: &str) -> Result<String> {
-        if !self.authenticated {
+        // Try once, reconnect on failure, try again
+        match self.execute_inner(command).await {
+            Ok(response) => Ok(response),
+            Err(e) => {
+                // Check if it's a connection error
+                let err_str = e.to_string();
+                if err_str.contains("Broken pipe")
+                    || err_str.contains("eof")
+                    || err_str.contains("not connected")
+                    || err_str.contains("not authenticated")
+                {
+                    warn!("RCON connection lost, reconnecting...");
+                    self.mark_disconnected();
+                    self.connect().await?;
+                    self.execute_inner(command).await
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Inner execute without reconnect logic
+    async fn execute_inner(&self, command: &str) -> Result<String> {
+        if !self.authenticated.load(Ordering::SeqCst) {
             return Err(GameRLError::IpcError("RCON not authenticated".to_string()));
         }
 
@@ -221,12 +260,7 @@ impl RconClient {
     }
 
     /// Call a remote interface function
-    pub async fn remote_call(
-        &self,
-        interface: &str,
-        func: &str,
-        args: &str,
-    ) -> Result<String> {
+    pub async fn remote_call(&self, interface: &str, func: &str, args: &str) -> Result<String> {
         let lua = format!("remote.call(\"{}\", \"{}\", {})", interface, func, args);
         self.lua(&lua).await
     }
@@ -280,11 +314,11 @@ impl RconClient {
     }
 
     /// Disconnect from the server
-    pub async fn disconnect(&mut self) {
+    pub async fn disconnect(&self) {
         if let Some(mut stream) = self.stream.lock().await.take() {
             let _ = stream.shutdown().await;
         }
-        self.authenticated = false;
+        self.authenticated.store(false, Ordering::SeqCst);
         info!("RCON disconnected");
     }
 }

@@ -265,8 +265,8 @@ local function extract_observation()
 end
 
 local function write_observation(obs)
-    local json = game.table_to_json(obs)
-    game.write_file("gamerl/observation.json", json, false)
+    local json = helpers.table_to_json(obs)
+    helpers.write_file("gamerl/observation.json", json, false)
 end
 
 -- ============================================================================
@@ -274,21 +274,22 @@ end
 -- ============================================================================
 
 local function execute_action(agent_id, action)
-    if not action or not action.type then
+    -- Handle both PascalCase (from JSON) and lowercase keys
+    local action_type = action and (action.Type or action.type)
+    if not action_type then
         return false, "Invalid action: missing type"
     end
 
     local surface = game.surfaces[1]
     local force = game.forces.player
-    local action_type = action.type
 
-    if action_type == "Noop" then
+    if action_type == "Noop" or action_type == "Wait" then
         return true, nil
 
     elseif action_type == "Build" then
-        local entity_name = action.entity
-        local position = action.position
-        local direction = action.direction or 0
+        local entity_name = action.entity or action.Entity
+        local position = action.position or action.Position
+        local direction = action.direction or action.Direction or 0
 
         if not entity_name or not position then
             return false, "Build requires entity and position"
@@ -314,8 +315,8 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "Mine" then
-        local entity_id = action.entity_id
-        local position = action.position
+        local entity_id = action.entity_id or action.EntityId
+        local position = action.position or action.Position
 
         local entity = nil
         if entity_id then
@@ -343,8 +344,8 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "SetRecipe" then
-        local entity_id = action.entity_id
-        local recipe_name = action.recipe
+        local entity_id = action.entity_id or action.EntityId
+        local recipe_name = action.recipe or action.Recipe
 
         if not entity_id or not recipe_name then
             return false, "SetRecipe requires entity_id and recipe"
@@ -367,7 +368,7 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "StartResearch" then
-        local technology = action.technology
+        local technology = action.technology or action.Technology
         if not technology then
             return false, "StartResearch requires technology"
         end
@@ -382,7 +383,7 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "RotateEntity" then
-        local entity_id = action.entity_id
+        local entity_id = action.entity_id or action.EntityId
         if not entity_id then
             return false, "RotateEntity requires entity_id"
         end
@@ -443,7 +444,7 @@ remote.add_interface("gamerl", {
         -- Parse action if string
         local action = action_json
         if type(action_json) == "string" then
-            action = game.json_to_table(action_json)
+            action = helpers.json_to_table(action_json)
         end
 
         -- Execute action

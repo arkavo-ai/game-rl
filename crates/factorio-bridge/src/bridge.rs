@@ -9,8 +9,8 @@ use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, Capabilities, GameManifest,
     GameRLError, Observation, Result, StepResult, StreamDescriptor,
 };
-use game_rl_server::environment::StateUpdate;
 use game_rl_server::GameEnvironment;
+use game_rl_server::environment::StateUpdate;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -113,7 +113,7 @@ impl FactorioBridge {
     pub async fn init(&mut self) -> Result<()> {
         info!("Connecting to Factorio at {}", self.config.rcon_address);
 
-        // Connect to RCON
+        // Connect to RCON (auto-reconnects on failures)
         self.rcon.connect().await?;
 
         // Query game version (use rcon.print to get output)
@@ -157,8 +157,9 @@ impl FactorioBridge {
     /// Execute a Lua command that returns JSON
     async fn lua_json<T: serde::de::DeserializeOwned>(&self, lua: &str) -> Result<T> {
         let response = self.rcon.lua(lua).await?;
-        serde_json::from_str(&response)
-            .map_err(|e| GameRLError::SerializationError(format!("Failed to parse response: {}", e)))
+        serde_json::from_str(&response).map_err(|e| {
+            GameRLError::SerializationError(format!("Failed to parse response: {}", e))
+        })
     }
 }
 
@@ -212,7 +213,10 @@ impl GameEnvironment for FactorioBridge {
     async fn deregister_agent(&mut self, agent_id: &AgentId) -> Result<()> {
         info!("Deregistering agent {}", agent_id);
 
-        let lua = format!(r#"remote.call("gamerl", "deregister_agent", "{}")"#, agent_id);
+        let lua = format!(
+            r#"remote.call("gamerl", "deregister_agent", "{}")"#,
+            agent_id
+        );
         self.rcon.lua(&lua).await?;
 
         self.agents.remove(agent_id);
@@ -259,13 +263,18 @@ impl GameEnvironment for FactorioBridge {
     }
 
     async fn reset(&mut self, seed: Option<u64>, scenario: Option<String>) -> Result<Observation> {
-        info!("Resetting environment (seed: {:?}, scenario: {:?})", seed, scenario);
+        info!(
+            "Resetting environment (seed: {:?}, scenario: {:?})",
+            seed, scenario
+        );
 
         // Clear previous observation
         self.observer.clear().await?;
 
         // Call reset via RCON
-        let seed_arg = seed.map(|s| s.to_string()).unwrap_or_else(|| "nil".to_string());
+        let seed_arg = seed
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| "nil".to_string());
         let scenario_arg = scenario
             .map(|s| format!("\"{}\"", s))
             .unwrap_or_else(|| "nil".to_string());
@@ -308,7 +317,10 @@ impl GameEnvironment for FactorioBridge {
         agent_id: &AgentId,
         profile: &str,
     ) -> Result<Vec<StreamDescriptor>> {
-        info!("Configuring streams for {} with profile {}", agent_id, profile);
+        info!(
+            "Configuring streams for {} with profile {}",
+            agent_id, profile
+        );
 
         let lua = format!(
             r#"remote.call("gamerl", "configure_streams", "{}", "{}")"#,

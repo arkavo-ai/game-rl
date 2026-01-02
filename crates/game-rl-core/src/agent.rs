@@ -6,28 +6,24 @@ use std::collections::HashMap;
 /// Unique identifier for an agent
 pub type AgentId = String;
 
-/// Standard agent archetypes
+/// Standard agent archetypes (game-agnostic)
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
 pub enum AgentType {
-    /// Controls a single game entity (NPC, unit, pawn, survivor)
-    EntityBehavior,
-    /// Player-controlled character (first/third person games)
+    /// Passive observer - receives observations but takes no actions
+    Observer,
+    /// Controls a player character or avatar
     Player,
-    /// High-level strategic control of multiple entities (RTS, colony sims)
-    StrategyController,
-    /// Legacy alias for StrategyController
-    #[serde(alias = "ColonyManager")]
-    ColonyManager,
-    /// Controls environmental systems (weather, economy, spawning)
-    WorldSimulation,
-    /// Narrative control, event triggering, difficulty adjustment
-    GameMaster,
-    /// Controls NPC dialogue and conversation
-    DialogueAgent,
-    /// Orchestrates combat encounters
-    CombatDirector,
-    /// Custom agent type
+    /// Controls a single game entity (NPC, unit, pawn)
+    Entity,
+    /// High-level strategic control (RTS commander, factory planner)
+    #[serde(alias = "StrategyController", alias = "ColonyManager")]
+    Controller,
+    /// Controls game systems (weather, economy, spawning, physics)
+    System,
+    /// Meta-level control (narrative, difficulty, events)
+    Director,
+    /// Custom agent type for game-specific needs
     Custom(String),
 }
 

@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use tokio::fs;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 use tracing::debug;
 
 /// Configuration for the observation reader
@@ -43,8 +43,7 @@ impl ObserverConfig {
     pub fn linux() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".to_string());
         Self {
-            observation_dir: PathBuf::from(home)
-                .join(".factorio/script-output/gamerl"),
+            observation_dir: PathBuf::from(home).join(".factorio/script-output/gamerl"),
             ..Default::default()
         }
     }
@@ -282,10 +281,7 @@ impl ObservationReader {
     }
 
     /// Convert Factorio observation to game-rl Observation
-    pub fn to_observation(
-        factorio_obs: &FactorioObservation,
-        agent_id: &str,
-    ) -> Observation {
+    pub fn to_observation(factorio_obs: &FactorioObservation, agent_id: &str) -> Observation {
         let agent_obs = factorio_obs.agents.get(agent_id);
 
         let mut data = serde_json::Map::new();
@@ -294,15 +290,30 @@ impl ObservationReader {
         data.insert("tick".to_string(), serde_json::json!(factorio_obs.tick));
 
         // Add global state
-        data.insert("global".to_string(), serde_json::to_value(&factorio_obs.global).unwrap_or_default());
+        data.insert(
+            "global".to_string(),
+            serde_json::to_value(&factorio_obs.global).unwrap_or_default(),
+        );
 
         // Add agent-specific data
         if let Some(agent) = agent_obs {
-            data.insert("entities".to_string(), serde_json::to_value(&agent.entities).unwrap_or_default());
-            data.insert("resources".to_string(), serde_json::to_value(&agent.resources).unwrap_or_default());
-            data.insert("enemies".to_string(), serde_json::to_value(&agent.enemies).unwrap_or_default());
+            data.insert(
+                "entities".to_string(),
+                serde_json::to_value(&agent.entities).unwrap_or_default(),
+            );
+            data.insert(
+                "resources".to_string(),
+                serde_json::to_value(&agent.resources).unwrap_or_default(),
+            );
+            data.insert(
+                "enemies".to_string(),
+                serde_json::to_value(&agent.enemies).unwrap_or_default(),
+            );
             if let Some(bounds) = &agent.bounds {
-                data.insert("bounds".to_string(), serde_json::to_value(bounds).unwrap_or_default());
+                data.insert(
+                    "bounds".to_string(),
+                    serde_json::to_value(bounds).unwrap_or_default(),
+                );
             }
         }
 
@@ -315,7 +326,10 @@ impl ObservationReader {
     }
 
     /// Extract reward and done flag for an agent
-    pub fn get_step_info(factorio_obs: &FactorioObservation, agent_id: &str) -> (f64, bool, HashMap<String, f64>) {
+    pub fn get_step_info(
+        factorio_obs: &FactorioObservation,
+        agent_id: &str,
+    ) -> (f64, bool, HashMap<String, f64>) {
         if let Some(agent) = factorio_obs.agents.get(agent_id) {
             (agent.reward, agent.done, agent.reward_components.clone())
         } else {
@@ -327,9 +341,9 @@ impl ObservationReader {
     pub async fn clear(&self) -> Result<()> {
         let path = self.observation_file();
         if path.exists() {
-            fs::write(&path, "")
-                .await
-                .map_err(|e| GameRLError::IpcError(format!("Failed to clear observation: {}", e)))?;
+            fs::write(&path, "").await.map_err(|e| {
+                GameRLError::IpcError(format!("Failed to clear observation: {}", e))
+            })?;
         }
         Ok(())
     }
@@ -343,7 +357,9 @@ impl ObservationReader {
     pub async fn ensure_dir(&self) -> Result<()> {
         fs::create_dir_all(&self.config.observation_dir)
             .await
-            .map_err(|e| GameRLError::IpcError(format!("Failed to create observation dir: {}", e)))?;
+            .map_err(|e| {
+                GameRLError::IpcError(format!("Failed to create observation dir: {}", e))
+            })?;
         Ok(())
     }
 }
@@ -351,6 +367,7 @@ impl ObservationReader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use game_rl_core::Action;
 
     #[test]
     fn test_parse_observation() {
@@ -394,5 +411,179 @@ mod tests {
         assert_eq!(agent.entities.len(), 1);
         assert_eq!(agent.reward, 1.5);
         assert!(!agent.done);
+    }
+
+    // =========================================================================
+    // Action serialization tests - verify Rust JSON matches what Lua expects
+    // =========================================================================
+    //
+    // Factorio control.lua expects actions with PascalCase "Type" field.
+    // These tests ensure Rust serializes actions correctly for Lua consumption.
+
+    #[test]
+    fn test_noop_action_serialization() {
+        // MCP sends this format
+        let json = r#"{"Type": "Noop"}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        // Verify it deserializes correctly
+        match &action {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
+                assert_eq!(action_type, "Noop");
+                assert!(params.is_empty());
+            }
+            _ => panic!("Expected Parameterized action, got {:?}", action),
+        }
+
+        // Verify serialization produces Lua-compatible JSON
+        let serialized = serde_json::to_string(&action).unwrap();
+        assert!(
+            serialized.contains(r#""Type":"Noop""#),
+            "Must have PascalCase Type for Lua: {}",
+            serialized
+        );
+    }
+
+    #[test]
+    fn test_build_action_serialization() {
+        // Test Build action as MCP sends it
+        let json =
+            r#"{"Type": "Build", "entity": "iron-chest", "position": [10, 20], "direction": 0}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
+                assert_eq!(action_type, "Build");
+                assert_eq!(params.get("entity").unwrap(), "iron-chest");
+                assert_eq!(
+                    params.get("position").unwrap(),
+                    &serde_json::json!([10, 20])
+                );
+                assert_eq!(params.get("direction").unwrap(), &serde_json::json!(0));
+            }
+            _ => panic!("Expected Parameterized action, got {:?}", action),
+        }
+
+        // Verify round-trip produces Lua-compatible JSON
+        let serialized = serde_json::to_string(&action).unwrap();
+        assert!(
+            serialized.contains(r#""Type":"Build""#),
+            "Must have PascalCase Type: {}",
+            serialized
+        );
+        assert!(
+            serialized.contains(r#""entity":"iron-chest""#),
+            "Must have entity field: {}",
+            serialized
+        );
+    }
+
+    #[test]
+    fn test_mine_action_serialization() {
+        let json = r#"{"Type": "Mine", "entity_id": 42}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
+                assert_eq!(action_type, "Mine");
+                assert_eq!(params.get("entity_id").unwrap(), &serde_json::json!(42));
+            }
+            _ => panic!("Expected Parameterized action"),
+        }
+    }
+
+    #[test]
+    fn test_set_recipe_action_serialization() {
+        let json = r#"{"Type": "SetRecipe", "entity_id": 100, "recipe": "iron-gear-wheel"}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
+                assert_eq!(action_type, "SetRecipe");
+                assert_eq!(params.get("entity_id").unwrap(), &serde_json::json!(100));
+                assert_eq!(params.get("recipe").unwrap(), "iron-gear-wheel");
+            }
+            _ => panic!("Expected Parameterized action"),
+        }
+    }
+
+    #[test]
+    fn test_start_research_action_serialization() {
+        let json = r#"{"Type": "StartResearch", "technology": "automation-2"}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
+                assert_eq!(action_type, "StartResearch");
+                assert_eq!(params.get("technology").unwrap(), "automation-2");
+            }
+            _ => panic!("Expected Parameterized action"),
+        }
+    }
+
+    #[test]
+    fn test_rotate_entity_action_serialization() {
+        let json = r#"{"Type": "RotateEntity", "entity_id": 55}"#;
+        let action: Action = serde_json::from_str(json).unwrap();
+
+        match &action {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
+                assert_eq!(action_type, "RotateEntity");
+                assert_eq!(params.get("entity_id").unwrap(), &serde_json::json!(55));
+            }
+            _ => panic!("Expected Parameterized action"),
+        }
+    }
+
+    #[test]
+    fn test_action_to_lua_json_format() {
+        // This test verifies that when we serialize an action to JSON for Lua,
+        // it produces the exact format Lua control.lua expects
+
+        let action = Action::Parameterized {
+            action_type: "Build".to_string(),
+            params: {
+                let mut p = std::collections::HashMap::new();
+                p.insert("entity".to_string(), serde_json::json!("transport-belt"));
+                p.insert("position".to_string(), serde_json::json!([5, 10]));
+                p.insert("direction".to_string(), serde_json::json!(2));
+                p
+            },
+        };
+
+        let json = serde_json::to_string(&action).unwrap();
+
+        // Parse back to verify structure
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Lua expects: action.Type or action.type
+        assert!(parsed.get("Type").is_some(), "Must have Type field for Lua");
+        assert_eq!(parsed["Type"], "Build");
+
+        // Lua expects: action.entity or action.Entity
+        assert!(parsed.get("entity").is_some(), "Must have entity field");
+        assert_eq!(parsed["entity"], "transport-belt");
+
+        // Lua expects: action.position or action.Position
+        assert!(parsed.get("position").is_some(), "Must have position field");
+        assert_eq!(parsed["position"], serde_json::json!([5, 10]));
     }
 }
