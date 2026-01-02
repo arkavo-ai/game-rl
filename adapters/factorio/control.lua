@@ -27,28 +27,90 @@ end
 local function get_force_stats(force)
     local stats = {
         research = nil,
-        technologies_researched = {},
-        items_produced = {},
-        items_consumed = {},
+        production = nil,
     }
 
-    -- Current research
+    -- Current research (always return object with all required fields)
     local current = force.current_research
-    if current then
-        stats.research = {
-            current = current.name,
-            progress = force.research_progress,
-        }
-    end
+    stats.research = {
+        current = current and current.name or nil,
+        progress = current and force.research_progress or 0,
+        completed = {},  -- Required by Rust - list of completed tech names
+        queue = {},      -- Research queue (Factorio 2.0)
+        researched_count = 0,
+    }
 
-    -- Count researched technologies
-    local count = 0
+    -- Count researched technologies and optionally build completed list
+    local researched_count = 0
+    local completed = {}
     for name, tech in pairs(force.technologies) do
         if tech.researched then
-            count = count + 1
+            researched_count = researched_count + 1
+            -- Only include first 50 to avoid huge payloads
+            if researched_count <= 50 then
+                table.insert(completed, name)
+            end
         end
     end
-    stats.technologies_researched_count = count
+    stats.research.researched_count = researched_count
+    stats.research.completed = completed
+
+    -- Research queue (Factorio 2.0 API)
+    pcall(function()
+        if force.research_queue then
+            for i, tech in ipairs(force.research_queue) do
+                table.insert(stats.research.queue, tech.name)
+                if i >= 5 then break end  -- Limit queue display
+            end
+        end
+    end)
+
+    -- Production statistics (Factorio 2.0 API changed - using safe access)
+    stats.production = {
+        items_produced = {},
+        items_consumed = {},
+        fluids_produced = {},
+        api_errors = {},  -- Track missing APIs for debugging
+    }
+
+    -- Safely try to get production stats and report missing APIs
+    -- Check which production stat APIs exist (each check wrapped separately)
+    local apis_to_check = {
+        "item_production_statistics",
+        "fluid_production_statistics",
+        "get_item_production_statistics",
+        "get_fluid_production_statistics",
+    }
+
+    for _, api_name in ipairs(apis_to_check) do
+        local exists_ok, exists = pcall(function() return force[api_name] ~= nil end)
+        if not exists_ok or not exists then
+            table.insert(stats.production.api_errors, "LuaForce missing: " .. api_name)
+        end
+    end
+
+    -- Try to get actual production data
+    local ok, err = pcall(function()
+        -- Try the method-style API (Factorio 2.0)
+        local get_stats_ok, item_stats = pcall(function()
+            if type(force.get_item_production_statistics) == "function" then
+                return force.get_item_production_statistics()
+            end
+            return nil
+        end)
+
+        if get_stats_ok and item_stats and item_stats.input_counts then
+            for name, count in pairs(item_stats.input_counts) do
+                if count > 0 then
+                    stats.production.items_produced[name] = count
+                end
+            end
+        end
+    end)
+
+    if not ok and err then
+        table.insert(stats.production.api_errors, "pcall error: " .. tostring(err))
+    end
 
     return stats
 end
@@ -135,6 +197,20 @@ local function get_entity_state(entity)
         state.energy = entity.energy
     end
 
+    -- Inventory contents (for containers, machines, inserters, etc.)
+    local inventory = entity.get_inventory(defines.inventory.chest)
+        or entity.get_inventory(defines.inventory.furnace_result)
+        or entity.get_inventory(defines.inventory.assembling_machine_output)
+    if inventory and #inventory > 0 then
+        state.inventory = {}
+        for i = 1, #inventory do
+            local stack = inventory[i]
+            if stack and stack.valid_for_read then
+                state.inventory[stack.name] = (state.inventory[stack.name] or 0) + stack.count
+            end
+        end
+    end
+
     return state
 end
 
@@ -150,8 +226,24 @@ local function extract_entities(surface, force, bounds)
         area = bounds and {{bounds.x_min, bounds.y_min}, {bounds.x_max, bounds.y_max}} or nil,
     }
 
+    -- Include player character(s) first
+    for _, player in pairs(game.connected_players) do
+        if player.character and player.character.valid then
+            local char = player.character
+            table.insert(entities, {
+                id = char.unit_number or 0,
+                type = "character",
+                name = "character",
+                position = {x = char.position.x, y = char.position.y},
+                direction = char.direction or 0,
+                health = char.health / char.max_health,
+                player_name = player.name,
+            })
+        end
+    end
+
     for _, entity in pairs(surface.find_entities_filtered(filter)) do
-        if entity.unit_number then  -- Only numbered entities
+        if entity.unit_number and entity.type ~= "character" then  -- Skip characters (already added)
             table.insert(entities, get_entity_state(entity))
             if #entities >= max_entities then break end  -- Limit for performance
         end
@@ -231,13 +323,17 @@ local function extract_observation()
     -- Increment observation sequence to ensure unique tick values
     storage.gamerl.obs_seq = (storage.gamerl.obs_seq or 0) + 1
 
+    local force_stats = get_force_stats(force)
     local obs = {
         tick = game.tick * 1000 + storage.gamerl.obs_seq,  -- Unique tick = game_tick * 1000 + seq
         global = {
             evolution_factor = game.forces.enemy.get_evolution_factor(surface),
-            research = get_force_stats(force).research,
+            research = force_stats.research,
+            production = force_stats.production,
             power = get_power_stats(surface, force),
             pollution = get_pollution_stats(surface),
+            game_speed = game.speed,
+            game_tick = game.tick,
         },
         agents = {},
         state_hash = nil,
@@ -265,8 +361,13 @@ local function extract_observation()
     return obs
 end
 
-local function write_observation(obs)
+local function write_observation(obs, agent_id)
     local json = helpers.table_to_json(obs)
+    -- Write to per-agent file to avoid race conditions with parallel steps
+    if agent_id then
+        helpers.write_file("gamerl/observation_" .. agent_id .. ".json", json, false)
+    end
+    -- Also write to shared file for backwards compatibility
     helpers.write_file("gamerl/observation.json", json, false)
 end
 
@@ -296,34 +397,42 @@ local function execute_action(agent_id, action)
             return false, "Build requires entity and position"
         end
 
-        local can_place = surface.can_place_entity{
+        -- Validate entity prototype exists
+        if not prototypes.entity[entity_name] then
+            return false, "Unknown entity: " .. tostring(entity_name)
+        end
+
+        -- Try to create entity directly (works in sandbox/creative mode even if can_place returns false)
+        local entity = surface.create_entity{
             name = entity_name,
             position = {position[1], position[2]},
             direction = direction,
             force = force,
         }
 
-        if can_place then
-            local entity = surface.create_entity{
-                name = entity_name,
-                position = {position[1], position[2]},
-                direction = direction,
-                force = force,
-            }
-            return entity ~= nil, entity and nil or "Failed to create entity"
+        if entity and entity.valid then
+            return true, nil
         else
-            return false, "Cannot place entity at position"
+            return false, "Cannot place " .. entity_name .. " at [" .. position[1] .. "," .. position[2] .. "]"
         end
 
     elseif action_type == "Mine" then
         local entity_id = action.entity_id or action.EntityId
         local position = action.position or action.Position
 
+        -- Convert entity_id to number for safe comparison
+        if entity_id then
+            entity_id = tonumber(entity_id)
+        end
+
         local entity = nil
         if entity_id then
-            -- Find by unit number
-            for _, e in pairs(surface.find_entities_filtered{force = force}) do
-                if e.unit_number == entity_id then
+            -- Find by unit number - search in a reasonable area around origin
+            -- Search all entities in chunks that have been generated
+            local found_count = 0
+            for _, e in pairs(surface.find_entities_filtered{}) do
+                found_count = found_count + 1
+                if e.unit_number and e.unit_number == entity_id then
                     entity = e
                     break
                 end
@@ -331,7 +440,6 @@ local function execute_action(agent_id, action)
         elseif position then
             local entities = surface.find_entities_filtered{
                 position = {position[1], position[2]},
-                force = force,
                 limit = 1,
             }
             entity = entities[1]
@@ -498,21 +606,37 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "SpawnEnemy" then
-        -- Spawn an enemy unit (for testing)
+        -- Spawn enemy units (for testing)
         local position = action.position or action.Position
         local enemy_type = action.enemy_type or action.EnemyType or "small-biter"
+        local count = action.count or action.Count or 1
 
         if not position then
             return false, "SpawnEnemy requires position"
         end
 
-        local entity = surface.create_entity{
-            name = enemy_type,
-            position = {position[1], position[2]},
-            force = "enemy",
-        }
+        -- Validate enemy type exists
+        if not prototypes.entity[enemy_type] then
+            return false, "Unknown enemy type: " .. tostring(enemy_type)
+        end
 
-        return entity ~= nil, entity and nil or "Failed to spawn enemy"
+        local spawned = 0
+        for i = 1, count do
+            -- Offset each enemy slightly to prevent stacking
+            local offset_x = (i - 1) % 3
+            local offset_y = math.floor((i - 1) / 3)
+            local entity = surface.create_entity{
+                name = enemy_type,
+                position = {position[1] + offset_x, position[2] + offset_y},
+                force = "enemy",
+            }
+            if entity then spawned = spawned + 1 end
+        end
+
+        if spawned == 0 then
+            return false, "Failed to spawn any enemies"
+        end
+        return true, nil
 
     elseif action_type == "BuildTurret" then
         -- Convenience action for building defensive turrets
@@ -2173,7 +2297,16 @@ remote.add_interface("gamerl", {
 
         -- Write observation immediately (ticks_to_run doesn't work reliably in headless)
         local obs = extract_observation()
-        write_observation(obs)
+
+        -- Include action result in observation for feedback
+        obs.action_result = {
+            success = success,
+            ["error"] = error_msg,
+            action_type = action and (action.Type or action.type) or nil
+        }
+
+        -- Write per-agent observation to avoid race conditions
+        write_observation(obs, agent_id)
 
         return success
     end,

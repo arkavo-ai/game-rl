@@ -157,14 +157,91 @@ The mod writes game state to `script-output/gamerl/observation.json`:
 
 ### Action Types
 
+Actions use `{"Type": "ActionName", ...params}`. Parameters accept both PascalCase and lowercase.
+
+#### Core Actions
 | Action | Parameters | Description |
 |--------|------------|-------------|
-| `Build` | `entity`, `position`, `direction` | Place an entity |
+| `Noop` / `Wait` | - | Do nothing |
+| `Build` | `entity`, `position`, `direction?` | Place entity at [x,y]. direction: 0=N, 2=E, 4=S, 6=W |
 | `Mine` | `entity_id` or `position` | Remove an entity |
-| `SetRecipe` | `entity_id`, `recipe` | Set assembler recipe |
-| `RotateEntity` | `entity_id` | Rotate an entity |
-| `StartResearch` | `technology` | Begin research |
-| `Noop` | (none) | Take no action |
+| `SetRecipe` | `entity_id`, `recipe` | Set assembler/furnace recipe |
+| `RotateEntity` | `entity_id` | Rotate entity 90° |
+| `StartResearch` | `technology` | Begin researching technology |
+
+#### Combat Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `Attack` | `position?`, `damage?`, `damage_type?` | Attack enemy (physical/fire/explosion) |
+| `AttackArea` | `position`, `radius?`, `damage?` | AoE damage (default radius 10) |
+| `SpawnEnemy` | `position`, `enemy_type?`, `count?` | Spawn biters for testing |
+| `BuildTurret` | `position`, `turret_type?` | Place turret (gun/laser/flamethrower) |
+
+#### Logistics Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `TransferItems` | `from_id`, `to_id`, `item?`, `count?` | Move items between inventories |
+| `InsertItems` | `entity_id`, `item`, `count?` | Add items to entity |
+| `SetFilter` | `entity_id`, `slot`, `item` | Set inserter/container filter |
+| `ConnectWire` | `from_id`, `to_id`, `wire_type?` | Connect circuit wire (red/green) |
+| `DeconstructArea` | `position`, `radius` | Mark area for deconstruction |
+
+#### Train Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `AddTrainSchedule` | `train_id`, `station` | Add station to schedule |
+| `ClearTrainSchedule` | `train_id` | Clear train schedule |
+| `SetTrainManual` | `train_id`, `manual` | Toggle manual mode |
+
+#### Blueprint Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `CreateBlueprint` | `position`, `radius` | Capture blueprint from area |
+| `PlaceBlueprint` | `blueprint`, `position`, `direction?` | Place blueprint |
+
+#### Utility Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `Teleport` | `position` | Move player character |
+| `ChartArea` | `position`, `radius?` | Reveal map (default radius 100) |
+| `SetSpeed` | `speed` | Set game speed multiplier |
+| `SpawnResource` | `position`, `resource_type`, `amount?` | Create resource patch |
+| `RepairEntity` | `entity_id` | Restore entity to full health |
+
+#### Circuit Network Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `ReadCircuitSignals` | `entity_id` | Read circuit network signals |
+| `SetCombinatorSignal` | `entity_id`, `signals` | Set constant combinator |
+| `ConfigureDecider` | `entity_id`, `conditions`, `output` | Configure decider combinator |
+| `ConfigureArithmetic` | `entity_id`, `operation`, `first`, `second`, `output` | Configure arithmetic combinator |
+
+#### Vehicle Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `EnterVehicle` | `vehicle_id` | Player enters vehicle |
+| `ExitVehicle` | - | Player exits vehicle |
+| `SetSpidertronWaypoint` | `entity_id`, `position` | Add spidertron waypoint |
+
+#### Advanced Actions
+| Action | Parameters | Description |
+|--------|------------|-------------|
+| `LaunchRocket` | `silo_id` | Launch rocket from silo |
+| `FireArtillery` | `entity_id`, `position` | Fire artillery at target |
+| `InsertModule` | `entity_id`, `module` | Insert module into machine |
+| `PlaceTiles` | `tiles` | Place multiple tiles |
+
+### Common Entity Names
+
+```
+transport-belt, fast-transport-belt, express-transport-belt
+inserter, fast-inserter, stack-inserter
+assembling-machine-1, assembling-machine-2, assembling-machine-3
+electric-mining-drill, stone-furnace, steel-furnace, electric-furnace
+solar-panel, accumulator, small-electric-pole, medium-electric-pole
+pipe, pipe-to-ground, offshore-pump, boiler, steam-engine
+lab, radar, roboport, logistic-chest-passive-provider
+```
 
 ### Agent Types
 

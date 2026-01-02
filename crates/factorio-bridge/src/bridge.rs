@@ -8,6 +8,7 @@ use async_trait::async_trait;
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, Capabilities, GameManifest,
     GameRLError, Observation, Result, StepResult, StreamDescriptor,
+    manifest::Scenario,
 };
 use game_rl_server::GameEnvironment;
 use game_rl_server::environment::StateUpdate;
@@ -17,6 +18,139 @@ use std::path::PathBuf;
 use tokio::sync::broadcast;
 use tokio::time::Duration;
 use tracing::{debug, info};
+
+/// Generate the Factorio action schema for a specific agent type
+fn factorio_action_schema(agent_type: &AgentType) -> serde_json::Value {
+    let base_actions = serde_json::json!({
+        "Noop": {"params": [], "description": "Do nothing"},
+        "Wait": {"params": [], "description": "Alias for Noop"}
+    });
+
+    let build_actions = serde_json::json!({
+        "Build": {
+            "params": ["entity", "position", "direction?"],
+            "description": "Place entity at [x,y]. direction: 0=north,2=east,4=south,6=west",
+            "example": {"Type": "Build", "entity": "transport-belt", "position": [0, 5]}
+        },
+        "Mine": {"params": ["entity_id | position"], "description": "Remove entity by ID or position"},
+        "SetRecipe": {"params": ["entity_id", "recipe"], "description": "Set assembler/furnace recipe"},
+        "RotateEntity": {"params": ["entity_id"], "description": "Rotate entity 90 degrees"},
+        "StartResearch": {"params": ["technology"], "description": "Begin researching technology"}
+    });
+
+    let logistics_actions = serde_json::json!({
+        "TransferItems": {"params": ["from_id", "to_id", "item?", "count?"], "description": "Move items between inventories"},
+        "InsertItems": {"params": ["entity_id", "item", "count?"], "description": "Add items to entity"},
+        "SetFilter": {"params": ["entity_id", "slot", "item"], "description": "Set inserter/container filter"},
+        "ConnectWire": {"params": ["from_id", "to_id", "wire_type?"], "description": "Connect circuit wire (red/green)"},
+        "DeconstructArea": {"params": ["position", "radius"], "description": "Mark area for deconstruction"}
+    });
+
+    let train_actions = serde_json::json!({
+        "AddTrainSchedule": {"params": ["train_id", "station"], "description": "Add station to schedule"},
+        "ClearTrainSchedule": {"params": ["train_id"], "description": "Clear train schedule"},
+        "SetTrainManual": {"params": ["train_id", "manual"], "description": "Toggle manual mode"}
+    });
+
+    let blueprint_actions = serde_json::json!({
+        "CreateBlueprint": {"params": ["position", "radius"], "description": "Capture blueprint from area"},
+        "PlaceBlueprint": {"params": ["blueprint", "position", "direction?"], "description": "Place blueprint"}
+    });
+
+    let circuit_actions = serde_json::json!({
+        "ReadCircuitSignals": {"params": ["entity_id"], "description": "Read circuit network signals"},
+        "SetCombinatorSignal": {"params": ["entity_id", "signals"], "description": "Set constant combinator"},
+        "ConfigureDecider": {"params": ["entity_id", "conditions", "output"], "description": "Configure decider combinator"},
+        "ConfigureArithmetic": {"params": ["entity_id", "operation", "first", "second", "output"], "description": "Configure arithmetic combinator"}
+    });
+
+    let player_actions = serde_json::json!({
+        "Teleport": {"params": ["position"], "description": "Move player character"},
+        "EnterVehicle": {"params": ["vehicle_id"], "description": "Player enters vehicle"},
+        "ExitVehicle": {"params": [], "description": "Player exits current vehicle"},
+        "Attack": {"params": ["position?", "damage?", "damage_type?"], "description": "Attack enemy (physical/fire/explosion)"},
+        "AttackArea": {"params": ["position", "radius?", "damage?"], "description": "AoE damage (default radius 10)"}
+    });
+
+    let director_actions = serde_json::json!({
+        "SpawnEnemy": {"params": ["position", "enemy_type?", "count?"], "description": "Spawn biters for testing"},
+        "SpawnResource": {"params": ["position", "resource_type", "amount?"], "description": "Create resource patch"},
+        "ChartArea": {"params": ["position", "radius?"], "description": "Reveal map (default radius 100)"},
+        "SetSpeed": {"params": ["speed"], "description": "Set game speed multiplier"},
+        "DamageEntity": {"params": ["entity_id", "damage"], "description": "Damage entity"},
+        "RepairEntity": {"params": ["entity_id"], "description": "Restore entity to full health"},
+        "PlaceTiles": {"params": ["tiles"], "description": "Place multiple tiles"},
+        "LaunchRocket": {"params": ["silo_id"], "description": "Launch rocket from silo"},
+        "FireArtillery": {"params": ["entity_id", "position"], "description": "Fire artillery at target"}
+    });
+
+    let common_entities = serde_json::json!([
+        "transport-belt", "fast-transport-belt", "express-transport-belt",
+        "inserter", "fast-inserter", "stack-inserter",
+        "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
+        "electric-mining-drill", "stone-furnace", "steel-furnace", "electric-furnace",
+        "solar-panel", "accumulator", "small-electric-pole", "medium-electric-pole",
+        "pipe", "pipe-to-ground", "offshore-pump", "boiler", "steam-engine",
+        "lab", "radar", "roboport", "logistic-chest-passive-provider", "logistic-chest-requester"
+    ]);
+
+    // Build action set based on agent type
+    let (actions, description): (serde_json::Value, String) = match agent_type {
+        AgentType::Observer => (
+            serde_json::json!({}),
+            "Observer agent: read-only, no actions available".to_string()
+        ),
+        AgentType::Player => {
+            let mut actions = base_actions.as_object().unwrap().clone();
+            actions.extend(player_actions.as_object().unwrap().clone());
+            actions.extend(build_actions.as_object().unwrap().clone());
+            (serde_json::Value::Object(actions), "Player agent: direct character control and building".to_string())
+        },
+        AgentType::Entity => {
+            let mut actions = base_actions.as_object().unwrap().clone();
+            // Entity agents control a single unit - limited actions
+            actions.insert("Attack".into(), player_actions["Attack"].clone());
+            (serde_json::Value::Object(actions), "Entity agent: single unit control".to_string())
+        },
+        AgentType::Controller => {
+            let mut actions = base_actions.as_object().unwrap().clone();
+            actions.extend(build_actions.as_object().unwrap().clone());
+            actions.extend(logistics_actions.as_object().unwrap().clone());
+            actions.extend(train_actions.as_object().unwrap().clone());
+            actions.extend(blueprint_actions.as_object().unwrap().clone());
+            actions.extend(circuit_actions.as_object().unwrap().clone());
+            (serde_json::Value::Object(actions), "Controller agent: factory building and logistics".to_string())
+        },
+        AgentType::System => {
+            let mut actions = base_actions.as_object().unwrap().clone();
+            actions.insert("SetSpeed".into(), director_actions["SetSpeed"].clone());
+            actions.insert("ChartArea".into(), director_actions["ChartArea"].clone());
+            (serde_json::Value::Object(actions), "System agent: game system control".to_string())
+        },
+        AgentType::Director => {
+            let mut actions = base_actions.as_object().unwrap().clone();
+            actions.extend(build_actions.as_object().unwrap().clone());
+            actions.extend(logistics_actions.as_object().unwrap().clone());
+            actions.extend(player_actions.as_object().unwrap().clone());
+            actions.extend(director_actions.as_object().unwrap().clone());
+            (serde_json::Value::Object(actions), "Director agent: full game control including spawning".to_string())
+        },
+        AgentType::Custom(name) => {
+            // Custom agents get Controller-level access by default
+            let mut actions = base_actions.as_object().unwrap().clone();
+            actions.extend(build_actions.as_object().unwrap().clone());
+            actions.extend(logistics_actions.as_object().unwrap().clone());
+            (serde_json::Value::Object(actions), format!("Custom agent '{}': factory building and logistics", name))
+        },
+    };
+
+    serde_json::json!({
+        "type": "parameterized",
+        "description": format!("{}. Actions use {{\"Type\": \"ActionName\", ...params}}. Parameter names accept PascalCase or lowercase.", description),
+        "actions": actions,
+        "common_entities": common_entities
+    })
+}
 
 /// Configuration for Factorio bridge
 #[derive(Debug, Clone)]
@@ -186,18 +320,24 @@ impl GameEnvironment for FactorioBridge {
 
         self.agents.insert(agent_id.clone(), agent_type.clone());
 
-        // Return agent manifest with default spaces (mod will refine)
+        // Return agent manifest with action schema filtered by agent type
         Ok(AgentManifest {
             agent_id,
-            agent_type,
+            agent_type: agent_type.clone(),
             observation_space: serde_json::json!({
                 "type": "dict",
-                "description": "Factorio game state observation"
+                "fields": {
+                    "tick": "Current game tick",
+                    "entities": "Array of nearby entities with id, name, position, health",
+                    "resources": "Map of item counts in logistics network",
+                    "enemies": "Array of enemy units/structures",
+                    "pollution": "Pollution levels",
+                    "power": "Power production/consumption stats",
+                    "research": "Current research progress",
+                    "action_result": "Result of last action: {success, error, action_type}"
+                }
             }),
-            action_space: serde_json::json!({
-                "type": "dict",
-                "description": "Factorio action space"
-            }),
+            action_space: factorio_action_schema(&agent_type),
             reward_components: vec![],
         })
     }
@@ -229,8 +369,11 @@ impl GameEnvironment for FactorioBridge {
         );
         self.rcon.lua(&lua).await?;
 
-        // Wait for observation
-        let obs = self.observer.wait_for_observation().await?;
+        // Small delay to let Lua write the observation file
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Read observation directly (action result is in the observation, not an error)
+        let obs = self.observer.read_agent_observation(agent_id).await?;
 
         // Extract step result
         let observation = ObservationReader::to_observation(&obs, agent_id);
@@ -358,6 +501,19 @@ impl GameEnvironment for FactorioBridge {
     }
 
     fn manifest(&self) -> GameManifest {
+        use game_rl_core::stream::StreamProfile;
+
+        let mut stream_profiles = std::collections::HashMap::new();
+        stream_profiles.insert(
+            "none".to_string(),
+            StreamProfile {
+                name: "none".to_string(),
+                streams: vec![],
+            },
+        );
+        // Note: Vision streams not yet implemented for Factorio
+        // Future profiles could include: "256x256", "512x512", "1080p"
+
         GameManifest {
             name: "Factorio".to_string(),
             version: self.game_version.clone(),
@@ -365,13 +521,34 @@ impl GameEnvironment for FactorioBridge {
             capabilities: Capabilities {
                 multi_agent: true,
                 max_agents: 8,
+                agent_types: vec![
+                    "Observer".to_string(),
+                    "Player".to_string(),
+                    "Entity".to_string(),
+                    "Controller".to_string(),
+                    "System".to_string(),
+                    "Director".to_string(),
+                ],
                 deterministic: true,
-                headless: true,
+                headless: false,  // Can run with GUI
                 save_replay: true,
                 domain_randomization: true,
                 variable_timestep: true,
-                ..Default::default()
             },
+            scenarios: vec![
+                Scenario {
+                    name: "freeplay".to_string(),
+                    description: Some("Standard freeplay - build factory, launch rocket".to_string()),
+                    config: Default::default(),
+                },
+                Scenario {
+                    name: "sandbox".to_string(),
+                    description: Some("Creative mode with infinite resources".to_string()),
+                    config: Default::default(),
+                },
+            ],
+            stream_profiles,
+            tick_rate: 60,
             ..Default::default()
         }
     }
@@ -399,7 +576,8 @@ mod tests {
 
         assert_eq!(manifest.name, "Factorio");
         assert!(manifest.capabilities.deterministic);
-        assert!(manifest.capabilities.headless);
+        // headless is false for GUI playtesting mode
+        assert!(!manifest.capabilities.headless);
         assert_eq!(manifest.capabilities.max_agents, 8);
     }
 }

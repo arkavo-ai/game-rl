@@ -230,20 +230,12 @@ impl RconClient {
 
     /// Execute a Lua command via /c
     ///
-    /// Note: First /c command in a session triggers achievement warning.
-    /// We handle this by retrying if we get an empty response.
+    /// Note: First /c command in a session triggers achievement warning,
+    /// but in headless mode with mods this is typically not an issue.
+    /// Empty responses are normal for commands that use rcon.print().
     pub async fn lua(&self, lua_code: &str) -> Result<String> {
         let command = format!("/c {}", lua_code);
-        let response = self.execute(&command).await?;
-
-        // If response is empty, it might be the achievement warning
-        // Retry the command once
-        if response.is_empty() {
-            debug!("Empty response, retrying (may be achievement warning)");
-            return self.execute(&command).await;
-        }
-
-        Ok(response)
+        self.execute(&command).await
     }
 
     /// Call a remote interface function

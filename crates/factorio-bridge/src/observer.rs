@@ -75,6 +75,24 @@ pub struct FactorioObservation {
     /// State hash for determinism verification
     #[serde(default)]
     pub state_hash: Option<String>,
+
+    /// Result of the last action (success/error feedback)
+    #[serde(default)]
+    pub action_result: Option<ActionResult>,
+}
+
+/// Result of an action execution
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct ActionResult {
+    /// Whether the action succeeded
+    pub success: bool,
+    /// Error message if action failed
+    #[serde(default)]
+    pub error: Option<String>,
+    /// The action type that was attempted
+    #[serde(default)]
+    pub action_type: Option<String>,
 }
 
 /// Global game state
@@ -102,12 +120,22 @@ pub struct GlobalState {
     pub production: Option<ProductionStats>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct ResearchState {
+    #[serde(default)]
     pub current: Option<String>,
+    #[serde(default)]
     pub progress: f64,
-    pub completed: Vec<String>,
+    /// Completed technologies - uses Value to handle Lua empty tables {} vs arrays []
+    #[serde(default)]
+    pub completed: serde_json::Value,
+    /// Number of researched technologies (Factorio 2.0)
+    #[serde(default)]
+    pub researched_count: u32,
+    /// Research queue (Factorio 2.0) - uses Value to handle Lua empty tables {} vs arrays []
+    #[serde(default)]
+    pub queue: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -125,15 +153,22 @@ pub struct PollutionState {
     pub rate: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub struct ProductionStats {
-    /// Items produced per minute
+    /// Items produced (raw counts from force statistics)
     #[serde(default)]
-    pub items_per_minute: HashMap<String, f64>,
-    /// Science per minute
+    pub items_produced: HashMap<String, f64>,
+    /// Items consumed (raw counts from force statistics)
     #[serde(default)]
-    pub spm: f64,
+    pub items_consumed: HashMap<String, f64>,
+    /// Fluids produced (raw counts from force statistics)
+    #[serde(default)]
+    pub fluids_produced: HashMap<String, f64>,
+    /// API errors encountered when trying to read production stats
+    /// Uses Value to handle Lua empty tables {} vs arrays []
+    #[serde(default)]
+    pub api_errors: serde_json::Value,
 }
 
 /// Per-agent observation
@@ -196,6 +231,9 @@ pub struct EntityState {
     pub crafting_progress: Option<f64>,
     #[serde(default)]
     pub energy: Option<f64>,
+    /// Entity inventory contents (if applicable)
+    #[serde(default)]
+    pub inventory: Option<HashMap<String, f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -230,9 +268,14 @@ impl ObservationReader {
         }
     }
 
-    /// Get the observation file path
+    /// Get the observation file path (shared)
     fn observation_file(&self) -> PathBuf {
         self.config.observation_dir.join("observation.json")
+    }
+
+    /// Get the per-agent observation file path
+    fn agent_observation_file(&self, agent_id: &str) -> PathBuf {
+        self.config.observation_dir.join(format!("observation_{}.json", agent_id))
     }
 
     /// Read the current observation (non-blocking)
@@ -280,6 +323,80 @@ impl ObservationReader {
         }
     }
 
+    /// Read agent-specific observation directly (non-blocking, returns current state)
+    pub async fn read_agent_observation(&self, agent_id: &str) -> Result<FactorioObservation> {
+        let path = self.agent_observation_file(agent_id);
+
+        match fs::read_to_string(&path).await {
+            Ok(content) if !content.is_empty() => {
+                let obs: FactorioObservation = serde_json::from_str(&content)
+                    .map_err(|e| GameRLError::SerializationError(e.to_string()))?;
+                debug!("Read agent {} observation at tick {}", agent_id, obs.tick);
+                Ok(obs)
+            }
+            Ok(_) => Err(GameRLError::IpcError(format!(
+                "Agent {} observation file is empty",
+                agent_id
+            ))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(GameRLError::IpcError(
+                format!("Agent {} observation file not found", agent_id),
+            )),
+            Err(e) => Err(GameRLError::IpcError(format!(
+                "Failed to read agent observation: {}",
+                e
+            ))),
+        }
+    }
+
+    /// Wait for agent-specific observation (avoids race conditions with parallel steps)
+    pub async fn wait_for_agent_observation(&self, agent_id: &str) -> Result<FactorioObservation> {
+        let path = self.agent_observation_file(agent_id);
+        let start = std::time::Instant::now();
+        let mut last_tick: u64 = 0;
+
+        // Try to read current tick to detect new observations
+        if let Ok(content) = fs::read_to_string(&path).await {
+            if !content.is_empty() {
+                if let Ok(obs) = serde_json::from_str::<FactorioObservation>(&content) {
+                    last_tick = obs.tick;
+                }
+            }
+        }
+
+        loop {
+            if start.elapsed() > self.config.timeout {
+                return Err(GameRLError::IpcError(
+                    format!("Timeout waiting for observation for agent {}", agent_id),
+                ));
+            }
+
+            match fs::read_to_string(&path).await {
+                Ok(content) if !content.is_empty() => {
+                    match serde_json::from_str::<FactorioObservation>(&content) {
+                        Ok(obs) if obs.tick > last_tick => {
+                            debug!("Read agent {} observation at tick {}", agent_id, obs.tick);
+                            return Ok(obs);
+                        }
+                        Ok(_) => {} // Same tick, keep waiting
+                        Err(e) => {
+                            debug!("Failed to parse observation: {}", e);
+                        }
+                    }
+                }
+                Ok(_) => {} // Empty file
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // File not yet created
+                Err(e) => {
+                    return Err(GameRLError::IpcError(format!(
+                        "Failed to read agent observation: {}",
+                        e
+                    )));
+                }
+            }
+
+            sleep(self.config.poll_interval).await;
+        }
+    }
+
     /// Convert Factorio observation to game-rl Observation
     pub fn to_observation(factorio_obs: &FactorioObservation, agent_id: &str) -> Observation {
         let agent_obs = factorio_obs.agents.get(agent_id);
@@ -320,6 +437,14 @@ impl ObservationReader {
         // Add state hash if available
         if let Some(hash) = &factorio_obs.state_hash {
             data.insert("state_hash".to_string(), serde_json::json!(hash));
+        }
+
+        // Add action result for feedback on success/failure
+        if let Some(action_result) = &factorio_obs.action_result {
+            data.insert(
+                "action_result".to_string(),
+                serde_json::to_value(action_result).unwrap_or_default(),
+            );
         }
 
         Observation::Custom(serde_json::Value::Object(data))
@@ -585,5 +710,297 @@ mod tests {
         // Lua expects: action.position or action.Position
         assert!(parsed.get("position").is_some(), "Must have position field");
         assert_eq!(parsed["position"], serde_json::json!([5, 10]));
+    }
+
+    // =========================================================================
+    // Lua → Rust serialization tests
+    // These test that Rust can deserialize the exact JSON format Lua produces
+    // =========================================================================
+
+    #[test]
+    fn test_lua_observation_format_full() {
+        // This is the exact format Lua control.lua produces
+        let lua_json = r#"{
+            "tick": 216004234,
+            "global": {
+                "evolution_factor": 0.014,
+                "research": {
+                    "current": null,
+                    "progress": 0,
+                    "completed": ["automation", "logistics"],
+                    "queue": [],
+                    "researched_count": 2
+                },
+                "production": {
+                    "items_produced": {"iron-plate": 100},
+                    "items_consumed": {"iron-ore": 50},
+                    "fluids_produced": {},
+                    "api_errors": []
+                },
+                "power": {
+                    "production": 5000,
+                    "consumption": 4500,
+                    "satisfaction": 1.0
+                },
+                "pollution": {
+                    "total": 100.5,
+                    "rate": 0.5
+                },
+                "game_speed": 1,
+                "game_tick": 216004234
+            },
+            "agents": {},
+            "state_hash": "216004234-abc"
+        }"#;
+
+        let obs: FactorioObservation = serde_json::from_str(lua_json)
+            .expect("Should deserialize full Lua observation");
+
+        assert_eq!(obs.tick, 216004234);
+        assert_eq!(obs.global.evolution_factor, 0.014);
+        assert_eq!(obs.global.research.as_ref().unwrap().researched_count, 2);
+        assert!(obs.global.research.as_ref().unwrap().completed.as_array().map_or(false, |a| a.len() == 2));
+    }
+
+    #[test]
+    fn test_lua_empty_tables_as_objects() {
+        // In Lua, empty tables {} serialize as JSON objects {}, not arrays []
+        // This tests that Rust can handle empty objects where arrays are expected
+        let lua_json = r#"{
+            "tick": 1000,
+            "global": {
+                "evolution_factor": 0,
+                "research": {
+                    "progress": 0,
+                    "queue": {},
+                    "researched_count": 0,
+                    "completed": []
+                },
+                "production": {
+                    "items_produced": {},
+                    "items_consumed": {},
+                    "fluids_produced": {},
+                    "api_errors": {}
+                },
+                "power": {
+                    "production": 0,
+                    "consumption": 0,
+                    "satisfaction": 1
+                },
+                "pollution": {
+                    "total": 0,
+                    "rate": 0
+                },
+                "game_speed": 1,
+                "game_tick": 1000
+            },
+            "agents": {},
+            "state_hash": "1000-x"
+        }"#;
+
+        let obs: FactorioObservation = serde_json::from_str(lua_json)
+            .expect("Should handle empty Lua tables as objects");
+
+        assert_eq!(obs.tick, 1000);
+    }
+
+    #[test]
+    fn test_lua_missing_optional_fields() {
+        // Lua may omit optional fields entirely
+        let lua_json = r#"{
+            "tick": 500,
+            "global": {
+                "evolution_factor": 0,
+                "power": {
+                    "production": 0,
+                    "consumption": 0,
+                    "satisfaction": 1
+                },
+                "pollution": {
+                    "total": 0,
+                    "rate": 0
+                },
+                "game_speed": 1,
+                "game_tick": 500
+            },
+            "agents": {},
+            "state_hash": "500-y"
+        }"#;
+
+        let obs: FactorioObservation = serde_json::from_str(lua_json)
+            .expect("Should handle missing optional fields");
+
+        assert!(obs.global.research.is_none());
+        assert!(obs.global.production.is_none());
+    }
+
+    #[test]
+    fn test_lua_research_state_variants() {
+        // Test various research state formats Lua might produce
+
+        // With active research
+        let with_research = r#"{
+            "current": "automation-2",
+            "progress": 0.45,
+            "completed": ["automation"],
+            "queue": ["logistics"],
+            "researched_count": 1
+        }"#;
+        let state: ResearchState = serde_json::from_str(with_research)
+            .expect("Should parse research with active tech");
+        assert_eq!(state.current, Some("automation-2".to_string()));
+        assert_eq!(state.progress, 0.45);
+        assert!(state.completed.as_array().map_or(false, |a| a.len() == 1));
+
+        // No research, empty queue as object (Lua behavior)
+        let no_research = r#"{
+            "current": null,
+            "progress": 0,
+            "completed": [],
+            "queue": {},
+            "researched_count": 0
+        }"#;
+        let state: ResearchState = serde_json::from_str(no_research)
+            .expect("Should parse research with empty queue as object");
+        assert!(state.current.is_none());
+
+        // Empty completed as object (Lua empty table {} serializes as object)
+        let empty_completed_obj = r#"{
+            "current": null,
+            "progress": 0,
+            "completed": {},
+            "queue": {},
+            "researched_count": 0
+        }"#;
+        let state: ResearchState = serde_json::from_str(empty_completed_obj)
+            .expect("Should parse research with completed as empty object");
+        // completed can be {} or [] - both are valid
+        assert!(state.completed.is_object() || state.completed.is_array());
+
+        // Minimal - only required fields
+        let minimal = r#"{
+            "progress": 0,
+            "researched_count": 5
+        }"#;
+        let state: ResearchState = serde_json::from_str(minimal)
+            .expect("Should parse minimal research state");
+        assert_eq!(state.researched_count, 5);
+        // Default is Null
+        assert!(state.completed.is_null() || state.completed.is_array() || state.completed.is_object());
+    }
+
+    #[test]
+    fn test_lua_empty_tables_critical() {
+        // CRITICAL: This tests the exact format Lua produces when there are no researched technologies
+        // Lua empty tables {} serialize as JSON objects {}, NOT arrays []
+        // This caused serialization errors in production
+        let lua_research = r#"{
+            "progress": 0,
+            "completed": {},
+            "queue": {},
+            "researched_count": 0
+        }"#;
+        let state: ResearchState = serde_json::from_str(lua_research)
+            .expect("CRITICAL: Must handle Lua empty table {} for completed field");
+        assert_eq!(state.researched_count, 0);
+    }
+
+    #[test]
+    fn test_lua_production_stats_variants() {
+        // Full production stats
+        let full = r#"{
+            "items_produced": {"iron-plate": 1000, "copper-plate": 500},
+            "items_consumed": {"iron-ore": 1000, "copper-ore": 500},
+            "fluids_produced": {"petroleum-gas": 100},
+            "api_errors": []
+        }"#;
+        let stats: ProductionStats = serde_json::from_str(full)
+            .expect("Should parse full production stats");
+        assert_eq!(stats.items_produced.get("iron-plate"), Some(&1000.0));
+
+        // Empty (Lua empty tables as objects)
+        let empty = r#"{
+            "items_produced": {},
+            "items_consumed": {},
+            "fluids_produced": {},
+            "api_errors": {}
+        }"#;
+        let stats: ProductionStats = serde_json::from_str(empty)
+            .expect("Should parse empty production stats");
+        assert!(stats.items_produced.is_empty());
+
+        // With API errors
+        let with_errors = r#"{
+            "items_produced": {},
+            "items_consumed": {},
+            "fluids_produced": {},
+            "api_errors": ["LuaForce missing: item_production_statistics"]
+        }"#;
+        let stats: ProductionStats = serde_json::from_str(with_errors)
+            .expect("Should parse production stats with API errors");
+        assert!(stats.api_errors.as_array().map_or(false, |a| a.len() == 1));
+    }
+
+    #[test]
+    fn test_lua_agent_observation_format() {
+        let agent_json = r#"{
+            "entities": [
+                {
+                    "id": 1,
+                    "type": "assembling-machine",
+                    "name": "assembling-machine-1",
+                    "position": {"x": 10.5, "y": 20.5},
+                    "health": 0.8,
+                    "direction": 2,
+                    "recipe": "iron-gear-wheel",
+                    "energy": 0.9
+                }
+            ],
+            "resources": {"iron-ore": 5000, "copper-ore": 3000},
+            "enemies": [],
+            "reward": 1.5,
+            "done": false,
+            "reward_components": {"production": 1.0, "efficiency": 0.5}
+        }"#;
+
+        let obs: AgentObservation = serde_json::from_str(agent_json)
+            .expect("Should parse agent observation");
+
+        assert_eq!(obs.entities.len(), 1);
+        assert_eq!(obs.entities[0].name, "assembling-machine-1");
+        assert_eq!(obs.entities[0].recipe, Some("iron-gear-wheel".to_string()));
+        assert_eq!(obs.reward, 1.5);
+    }
+
+    #[test]
+    fn test_lua_entity_state_variants() {
+        // Full entity
+        let full = r#"{
+            "id": 42,
+            "type": "furnace",
+            "name": "steel-furnace",
+            "position": {"x": 0, "y": 0},
+            "health": 1.0,
+            "direction": 0,
+            "recipe": "steel-plate",
+            "energy": 0.75,
+            "inventory": {"iron-plate": 10}
+        }"#;
+        let entity: EntityState = serde_json::from_str(full)
+            .expect("Should parse full entity");
+        assert_eq!(entity.id, 42);
+        assert_eq!(entity.recipe, Some("steel-plate".to_string()));
+
+        // Minimal entity (no optional fields)
+        let minimal = r#"{
+            "id": 1,
+            "type": "transport-belt",
+            "name": "transport-belt",
+            "position": {"x": 5, "y": 10}
+        }"#;
+        let entity: EntityState = serde_json::from_str(minimal)
+            .expect("Should parse minimal entity");
+        assert!(entity.recipe.is_none());
+        assert!(entity.inventory.is_none());
     }
 }
