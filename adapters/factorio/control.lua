@@ -1314,6 +1314,806 @@ local function execute_action(agent_id, action)
 
         return count > 0, count > 0 and nil or "No resources spawned"
 
+    -- ========== TIER 3: LOGISTICS NETWORK ==========
+
+    elseif action_type == "SetLogisticRequest" then
+        -- Set a logistic request slot on a requester/buffer chest or character
+        local entity_id = action.entity_id or action.EntityId
+        local slot = action.slot or action.Slot or 1
+        local item_name = action.item or action.Item
+        local min_count = action.min or action.Min or 0
+        local max_count = action.max or action.Max or (item_name and 100 or 0)
+
+        if not entity_id then
+            return false, "SetLogisticRequest requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local ok, err = pcall(function()
+            if item_name then
+                entity.set_request_slot({name = item_name, count = max_count}, slot)
+            else
+                entity.clear_request_slot(slot)
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to set request: " .. tostring(err))
+
+    elseif action_type == "ReadLogisticNetwork" then
+        -- Read contents of a logistic network
+        local entity_id = action.entity_id or action.EntityId
+        local position = action.position or action.Position
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local network = nil
+        if entity_id then
+            for _, e in pairs(surface.find_entities_filtered{force = force}) do
+                if e.unit_number == entity_id then
+                    network = e.logistic_network
+                    break
+                end
+            end
+        elseif position then
+            network = force.find_logistic_network_by_position({position[1], position[2]}, surface)
+        end
+
+        if not network then
+            return false, "No logistic network found"
+        end
+
+        -- Store network contents in observation
+        local contents = {}
+        for name, count in pairs(network.get_contents()) do
+            contents[name] = count
+        end
+
+        storage.gamerl.last_logistic_contents = {
+            items = contents,
+            robots = network.all_logistic_robots,
+            available_robots = network.available_logistic_robots,
+            charging_robots = network.charging_robots,
+        }
+
+        return true, nil
+
+    elseif action_type == "SetLogisticCondition" then
+        -- Set logistic/circuit condition on an entity
+        local entity_id = action.entity_id or action.EntityId
+        local condition_type = action.condition_type or action.ConditionType or "logistic"
+        local signal_name = action.signal or action.Signal
+        local comparator = action.comparator or action.Comparator or ">"
+        local constant = action.constant or action.Constant or 0
+
+        if not entity_id then
+            return false, "SetLogisticCondition requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local ok, err = pcall(function()
+            local behavior = entity.get_or_create_control_behavior()
+            if condition_type == "logistic" then
+                behavior.connect_to_logistic_network = true
+                if signal_name then
+                    behavior.logistic_condition = {
+                        condition = {
+                            first_signal = {type = "item", name = signal_name},
+                            comparator = comparator,
+                            constant = constant,
+                        }
+                    }
+                end
+            elseif condition_type == "circuit" then
+                behavior.circuit_condition = {
+                    condition = {
+                        first_signal = {type = signal_name and "item" or "virtual", name = signal_name or "signal-anything"},
+                        comparator = comparator,
+                        constant = constant,
+                    }
+                }
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to set condition: " .. tostring(err))
+
+    -- ========== TIER 3: CIRCUIT NETWORK ADVANCED ==========
+
+    elseif action_type == "ReadCircuitSignals" then
+        -- Read all circuit signals from an entity
+        local entity_id = action.entity_id or action.EntityId
+        local wire_type = action.wire or action.Wire or "red"
+
+        if not entity_id then
+            return false, "ReadCircuitSignals requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local wire_def = wire_type == "green" and defines.wire_type.green or defines.wire_type.red
+        local signals = {}
+
+        local ok, err = pcall(function()
+            local network = entity.get_circuit_network(wire_def)
+            if network and network.signals then
+                for _, signal in pairs(network.signals) do
+                    signals[signal.signal.name] = signal.count
+                end
+            end
+        end)
+
+        storage.gamerl.last_circuit_signals = signals
+        return ok, ok and nil or ("Failed to read signals: " .. tostring(err))
+
+    elseif action_type == "ConfigureDecider" then
+        -- Configure a decider combinator
+        local entity_id = action.entity_id or action.EntityId
+        local first_signal = action.first_signal or action.FirstSignal
+        local second_signal = action.second_signal or action.SecondSignal
+        local constant = action.constant or action.Constant
+        local comparator = action.comparator or action.Comparator or ">"
+        local output_signal = action.output_signal or action.OutputSignal
+        local copy_count = action.copy_count or action.CopyCount or false
+
+        if not entity_id then
+            return false, "ConfigureDecider requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = "decider-combinator"}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Decider combinator not found"
+        end
+
+        local ok, err = pcall(function()
+            local behavior = entity.get_or_create_control_behavior()
+            local params = behavior.parameters
+
+            -- Set first signal
+            if first_signal then
+                params.first_signal = {type = "item", name = first_signal}
+            end
+
+            -- Set second signal or constant
+            if second_signal then
+                params.second_signal = {type = "item", name = second_signal}
+                params.constant = nil
+            elseif constant then
+                params.constant = constant
+                params.second_signal = nil
+            end
+
+            params.comparator = comparator
+
+            -- Set output
+            if output_signal then
+                params.output_signal = {type = "item", name = output_signal}
+            end
+            params.copy_count_from_input = copy_count
+
+            behavior.parameters = params
+        end)
+
+        return ok, ok and nil or ("Failed to configure decider: " .. tostring(err))
+
+    elseif action_type == "ConfigureArithmetic" then
+        -- Configure an arithmetic combinator
+        local entity_id = action.entity_id or action.EntityId
+        local first_signal = action.first_signal or action.FirstSignal
+        local second_signal = action.second_signal or action.SecondSignal
+        local constant = action.constant or action.Constant
+        local operation = action.operation or action.Operation or "+"
+        local output_signal = action.output_signal or action.OutputSignal
+
+        if not entity_id then
+            return false, "ConfigureArithmetic requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = "arithmetic-combinator"}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Arithmetic combinator not found"
+        end
+
+        local ok, err = pcall(function()
+            local behavior = entity.get_or_create_control_behavior()
+            local params = behavior.parameters
+
+            if first_signal then
+                params.first_signal = {type = "item", name = first_signal}
+            end
+
+            if second_signal then
+                params.second_signal = {type = "item", name = second_signal}
+                params.second_constant = nil
+            elseif constant then
+                params.second_constant = constant
+                params.second_signal = nil
+            end
+
+            params.operation = operation
+
+            if output_signal then
+                params.output_signal = {type = "item", name = output_signal}
+            end
+
+            behavior.parameters = params
+        end)
+
+        return ok, ok and nil or ("Failed to configure arithmetic: " .. tostring(err))
+
+    -- ========== TIER 3: MODULE MANAGEMENT ==========
+
+    elseif action_type == "InsertModule" then
+        -- Insert a module into an entity
+        local entity_id = action.entity_id or action.EntityId
+        local module_name = action.module or action.Module
+        local slot = action.slot or action.Slot  -- nil = first available
+
+        if not entity_id or not module_name then
+            return false, "InsertModule requires entity_id and module"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local module_inv = entity.get_module_inventory()
+        if not module_inv then
+            return false, "Entity does not support modules"
+        end
+
+        local ok, err = pcall(function()
+            if slot then
+                module_inv.set_stack({index = slot, name = module_name, count = 1})
+            else
+                module_inv.insert{name = module_name, count = 1}
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to insert module: " .. tostring(err))
+
+    elseif action_type == "RemoveModule" then
+        -- Remove a module from an entity
+        local entity_id = action.entity_id or action.EntityId
+        local slot = action.slot or action.Slot or 1
+        local module_name = action.module or action.Module  -- specific module to remove
+
+        if not entity_id then
+            return false, "RemoveModule requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local module_inv = entity.get_module_inventory()
+        if not module_inv then
+            return false, "Entity does not support modules"
+        end
+
+        local ok, err = pcall(function()
+            if module_name then
+                module_inv.remove{name = module_name, count = 1}
+            else
+                local stack = module_inv[slot]
+                if stack and stack.valid_for_read then
+                    stack.clear()
+                end
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to remove module: " .. tostring(err))
+
+    elseif action_type == "GetModules" then
+        -- Get list of modules in an entity
+        local entity_id = action.entity_id or action.EntityId
+
+        if not entity_id then
+            return false, "GetModules requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local module_inv = entity.get_module_inventory()
+        if not module_inv then
+            return false, "Entity does not support modules"
+        end
+
+        local modules = {}
+        for i = 1, #module_inv do
+            local stack = module_inv[i]
+            if stack and stack.valid_for_read then
+                table.insert(modules, {slot = i, name = stack.name, count = stack.count})
+            end
+        end
+
+        storage.gamerl.last_modules = modules
+        return true, nil
+
+    -- ========== TIER 3: VEHICLE CONTROL ==========
+
+    elseif action_type == "EnterVehicle" then
+        -- Player enters a vehicle
+        local vehicle_id = action.vehicle_id or action.VehicleId
+        local player_index = action.player or action.Player or 1
+
+        if not vehicle_id then
+            return false, "EnterVehicle requires vehicle_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+        local player = game.players[player_index]
+
+        if not player or not player.character then
+            return false, "Player not found"
+        end
+
+        local vehicle = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = {"car", "tank", "locomotive", "cargo-wagon", "spider-vehicle"}}) do
+            if e.unit_number == vehicle_id then
+                vehicle = e
+                break
+            end
+        end
+
+        if not vehicle or not vehicle.valid then
+            return false, "Vehicle not found"
+        end
+
+        local ok = pcall(function()
+            vehicle.set_driver(player.character)
+        end)
+
+        return ok, ok and nil or "Failed to enter vehicle"
+
+    elseif action_type == "ExitVehicle" then
+        -- Player exits current vehicle
+        local player_index = action.player or action.Player or 1
+
+        local player = game.players[player_index]
+        if not player or not player.character then
+            return false, "Player not found"
+        end
+
+        if not player.vehicle then
+            return false, "Player not in a vehicle"
+        end
+
+        local ok = pcall(function()
+            player.vehicle.set_driver(nil)
+        end)
+
+        return ok, ok and nil or "Failed to exit vehicle"
+
+    elseif action_type == "SetSpidertronWaypoint" then
+        -- Add waypoint to spidertron
+        local entity_id = action.entity_id or action.EntityId
+        local position = action.position or action.Position
+        local add_to_queue = action.add_to_queue or action.AddToQueue or true
+
+        if not entity_id or not position then
+            return false, "SetSpidertronWaypoint requires entity_id and position"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local spider = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = "spider-vehicle"}) do
+            if e.unit_number == entity_id then
+                spider = e
+                break
+            end
+        end
+
+        if not spider or not spider.valid then
+            return false, "Spidertron not found"
+        end
+
+        local ok, err = pcall(function()
+            if add_to_queue then
+                spider.add_autopilot_destination({position[1], position[2]})
+            else
+                -- Clear existing and set single destination
+                while spider.autopilot_destination do
+                    spider.autopilot_destination = nil
+                end
+                spider.autopilot_destination = {position[1], position[2]}
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to set waypoint: " .. tostring(err))
+
+    elseif action_type == "ClearSpidertronWaypoints" then
+        -- Clear all spidertron waypoints
+        local entity_id = action.entity_id or action.EntityId
+
+        if not entity_id then
+            return false, "ClearSpidertronWaypoints requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local spider = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = "spider-vehicle"}) do
+            if e.unit_number == entity_id then
+                spider = e
+                break
+            end
+        end
+
+        if not spider or not spider.valid then
+            return false, "Spidertron not found"
+        end
+
+        local ok = pcall(function()
+            while spider.autopilot_destination do
+                spider.autopilot_destination = nil
+            end
+        end)
+
+        return ok, ok and nil or "Failed to clear waypoints"
+
+    -- ========== TIER 3: COPY/PASTE SETTINGS ==========
+
+    elseif action_type == "CopySettings" then
+        -- Copy entity settings to storage
+        local entity_id = action.entity_id or action.EntityId
+        local slot_name = action.slot or action.Slot or "default"
+
+        if not entity_id then
+            return false, "CopySettings requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        storage.gamerl.copied_settings = storage.gamerl.copied_settings or {}
+
+        local settings = {
+            entity_type = entity.type,
+            entity_name = entity.name,
+        }
+
+        local ok = pcall(function()
+            -- Copy recipe
+            if entity.get_recipe then
+                local recipe = entity.get_recipe()
+                settings.recipe = recipe and recipe.name
+            end
+
+            -- Copy control behavior
+            if entity.get_control_behavior then
+                local behavior = entity.get_control_behavior()
+                if behavior then
+                    settings.control_behavior = {}
+                    if behavior.parameters then
+                        settings.control_behavior.parameters = behavior.parameters
+                    end
+                end
+            end
+
+            -- Copy inserter settings
+            if entity.type == "inserter" then
+                settings.inserter = {
+                    filter_mode = entity.inserter_filter_mode,
+                    stack_size_override = entity.inserter_stack_size_override,
+                }
+            end
+
+            -- Copy bar setting for containers
+            if entity.get_inventory and entity.get_inventory(defines.inventory.chest) then
+                local inv = entity.get_inventory(defines.inventory.chest)
+                if inv.supports_bar then
+                    settings.bar = inv.get_bar()
+                end
+            end
+        end)
+
+        storage.gamerl.copied_settings[slot_name] = settings
+        return ok, ok and nil or "Failed to copy settings"
+
+    elseif action_type == "PasteSettings" then
+        -- Paste settings from storage to entity
+        local entity_id = action.entity_id or action.EntityId
+        local slot_name = action.slot or action.Slot or "default"
+
+        if not entity_id then
+            return false, "PasteSettings requires entity_id"
+        end
+
+        storage.gamerl.copied_settings = storage.gamerl.copied_settings or {}
+        local settings = storage.gamerl.copied_settings[slot_name]
+
+        if not settings then
+            return false, "No settings copied to slot: " .. slot_name
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local ok, err = pcall(function()
+            -- Paste recipe if compatible
+            if settings.recipe and entity.set_recipe then
+                entity.set_recipe(settings.recipe)
+            end
+
+            -- Paste control behavior
+            if settings.control_behavior and entity.get_or_create_control_behavior then
+                local behavior = entity.get_or_create_control_behavior()
+                if settings.control_behavior.parameters and behavior.parameters ~= nil then
+                    behavior.parameters = settings.control_behavior.parameters
+                end
+            end
+
+            -- Paste inserter settings
+            if settings.inserter and entity.type == "inserter" then
+                if settings.inserter.stack_size_override then
+                    entity.inserter_stack_size_override = settings.inserter.stack_size_override
+                end
+            end
+
+            -- Paste bar setting
+            if settings.bar and entity.get_inventory then
+                local inv = entity.get_inventory(defines.inventory.chest)
+                if inv and inv.supports_bar then
+                    inv.set_bar(settings.bar)
+                end
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to paste settings: " .. tostring(err))
+
+    -- ========== TIER 3: ARTILLERY ==========
+
+    elseif action_type == "FireArtillery" then
+        -- Fire artillery at a position
+        local entity_id = action.entity_id or action.EntityId
+        local position = action.position or action.Position
+
+        if not position then
+            return false, "FireArtillery requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        -- Find artillery
+        local artillery = nil
+        if entity_id then
+            for _, e in pairs(surface.find_entities_filtered{force = force, type = {"artillery-turret", "artillery-wagon"}}) do
+                if e.unit_number == entity_id then
+                    artillery = e
+                    break
+                end
+            end
+        else
+            local arty = surface.find_entities_filtered{force = force, type = {"artillery-turret", "artillery-wagon"}, limit = 1}
+            artillery = arty[1]
+        end
+
+        if not artillery or not artillery.valid then
+            return false, "Artillery not found"
+        end
+
+        local ok, err = pcall(function()
+            surface.create_entity{
+                name = "artillery-projectile",
+                position = artillery.position,
+                target = {position[1], position[2]},
+                speed = 1,
+                force = force,
+            }
+        end)
+
+        return ok, ok and nil or ("Failed to fire artillery: " .. tostring(err))
+
+    -- ========== TIER 3: ROCKET LAUNCH ==========
+
+    elseif action_type == "LaunchRocket" then
+        -- Launch rocket from a rocket silo
+        local entity_id = action.entity_id or action.EntityId
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local silo = nil
+        if entity_id then
+            for _, e in pairs(surface.find_entities_filtered{force = force, type = "rocket-silo"}) do
+                if e.unit_number == entity_id then
+                    silo = e
+                    break
+                end
+            end
+        else
+            local silos = surface.find_entities_filtered{force = force, type = "rocket-silo", limit = 1}
+            silo = silos[1]
+        end
+
+        if not silo or not silo.valid then
+            return false, "Rocket silo not found"
+        end
+
+        if not silo.rocket_silo_status then
+            return false, "Silo has no rocket ready"
+        end
+
+        -- Check if rocket is ready
+        if silo.rocket_silo_status ~= defines.rocket_silo_status.rocket_ready then
+            return false, "Rocket not ready (status: " .. tostring(silo.rocket_silo_status) .. ")"
+        end
+
+        local ok = pcall(function()
+            silo.launch_rocket()
+        end)
+
+        return ok, ok and nil or "Failed to launch rocket"
+
+    -- ========== TIER 3: LANDFILL / TERRAIN ==========
+
+    elseif action_type == "PlaceLandfill" then
+        -- Place landfill on water
+        local position = action.position or action.Position
+        local tile_name = action.tile or action.Tile or "landfill"
+
+        if not position then
+            return false, "PlaceLandfill requires position"
+        end
+
+        local surface = game.surfaces[1]
+
+        local ok, err = pcall(function()
+            surface.set_tiles({{name = tile_name, position = {position[1], position[2]}}})
+        end)
+
+        return ok, ok and nil or ("Failed to place landfill: " .. tostring(err))
+
+    elseif action_type == "PlaceTiles" then
+        -- Place multiple tiles in an area
+        local position = action.position or action.Position
+        local radius = action.radius or action.Radius or 1
+        local tile_name = action.tile or action.Tile or "concrete"
+
+        if not position then
+            return false, "PlaceTiles requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local tiles = {}
+
+        for dx = -radius, radius do
+            for dy = -radius, radius do
+                table.insert(tiles, {name = tile_name, position = {position[1] + dx, position[2] + dy}})
+            end
+        end
+
+        local ok, err = pcall(function()
+            surface.set_tiles(tiles)
+        end)
+
+        return ok, ok and nil or ("Failed to place tiles: " .. tostring(err))
+
     else
         return false, "Unknown action type: " .. tostring(action_type)
     end
