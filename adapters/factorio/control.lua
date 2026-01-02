@@ -228,8 +228,11 @@ local function extract_observation()
     local surface = game.surfaces[1]
     local force = game.forces.player
 
+    -- Increment observation sequence to ensure unique tick values
+    storage.gamerl.obs_seq = (storage.gamerl.obs_seq or 0) + 1
+
     local obs = {
-        tick = game.tick,
+        tick = game.tick * 1000 + storage.gamerl.obs_seq,  -- Unique tick = game_tick * 1000 + seq
         global = {
             evolution_factor = game.forces.enemy.get_evolution_factor(surface),
             research = get_force_stats(force).research,
@@ -462,15 +465,7 @@ remote.add_interface("gamerl", {
             game.print("[GameRL] Action failed: " .. error_msg)
         end
 
-        -- Advance simulation by ticks
-        ticks = ticks or 1
-        if ticks > 0 then
-            -- Use tick_paused + ticks_to_run for deterministic stepping
-            game.tick_paused = true
-            game.ticks_to_run = ticks
-        end
-
-        -- Extract and write observation
+        -- Write observation immediately (ticks_to_run doesn't work reliably in headless)
         local obs = extract_observation()
         write_observation(obs)
 
@@ -514,6 +509,7 @@ remote.add_interface("gamerl", {
             game.forces.enemy.get_evolution_factor(surface)
         )
 
+        rcon.print(hash)
         return hash
     end,
 
@@ -574,9 +570,11 @@ end)
 
 -- Periodic observation writing (configurable interval)
 script.on_event(defines.events.on_tick, function(event)
+    if not storage.gamerl then return end
+
     local interval = settings.global["gamerl-observation-interval"].value
     if event.tick % interval == 0 then
-        if storage.gamerl and next(storage.gamerl.agents) then
+        if next(storage.gamerl.agents) then
             local obs = extract_observation()
             write_observation(obs)
         end
