@@ -70,17 +70,15 @@ local function get_power_stats(surface, force)
     if #entities > 0 and entities[1].electric_network_id then
         local network = entities[1].electric_network_statistics
         if network then
-            -- These are flow statistics over time
-            stats.production = network.get_flow_count{
-                name = "electricity",
-                input = true,
-                precision_index = defines.flow_precision_index.one_second
-            } or 0
-            stats.consumption = network.get_flow_count{
-                name = "electricity",
-                input = false,
-                precision_index = defines.flow_precision_index.one_second
-            } or 0
+            -- Sum all input/output counts (Factorio 2.0 API)
+            pcall(function()
+                for name, _ in pairs(network.input_counts) do
+                    stats.production = stats.production + (network.get_input_count(name) or 0)
+                end
+                for name, _ in pairs(network.output_counts) do
+                    stats.consumption = stats.consumption + (network.get_output_count(name) or 0)
+                end
+            end)
         end
     end
 
@@ -375,9 +373,20 @@ local function execute_action(agent_id, action)
 
         local tech = force.technologies[technology]
         if tech and not tech.researched then
-            force.research_queue_enabled = true
-            force.add_research(technology)
-            return true, nil
+            -- Factorio 2.0: use current_research directly
+            pcall(function() force.research_queue_enabled = true end)
+            local ok, err = pcall(function()
+                if force.add_research then
+                    force.add_research(technology)
+                else
+                    force.current_research = tech
+                end
+            end)
+            if ok then
+                return true, nil
+            else
+                return false, "Failed to start research: " .. tostring(err)
+            end
         else
             return false, "Technology not available or already researched"
         end
