@@ -183,34 +183,41 @@ impl RconClient {
         debug!("RCON exec: {}", command);
         self.send_packet(&packet).await?;
 
-        // Factorio may split responses across multiple packets
-        // We use an empty packet technique to detect end of response
-        let terminator_id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let terminator = RconPacket::new(terminator_id, PacketType::ExecCommand, "");
-        self.send_packet(&terminator).await?;
+        // Read single response packet
+        // Note: For large responses, Factorio may split across packets,
+        // but for our use case single packets should suffice
+        let response_packet = self.recv_packet().await?;
 
-        let mut response = String::new();
-        loop {
-            let packet = self.recv_packet().await?;
-
-            if packet.id == terminator_id {
-                // Got the terminator response, we're done
-                break;
-            }
-
-            if packet.id == cmd_id {
-                response.push_str(&packet.body);
-            }
+        if response_packet.id != cmd_id {
+            debug!(
+                "Response ID mismatch: expected {}, got {}",
+                cmd_id, response_packet.id
+            );
         }
 
-        debug!("RCON response: {}", &response[..response.len().min(100)]);
-        Ok(response)
+        debug!(
+            "RCON response: {}",
+            &response_packet.body[..response_packet.body.len().min(100)]
+        );
+        Ok(response_packet.body)
     }
 
     /// Execute a Lua command via /c
+    ///
+    /// Note: First /c command in a session triggers achievement warning.
+    /// We handle this by retrying if we get an empty response.
     pub async fn lua(&self, lua_code: &str) -> Result<String> {
         let command = format!("/c {}", lua_code);
-        self.execute(&command).await
+        let response = self.execute(&command).await?;
+
+        // If response is empty, it might be the achievement warning
+        // Retry the command once
+        if response.is_empty() {
+            debug!("Empty response, retrying (may be achievement warning)");
+            return self.execute(&command).await;
+        }
+
+        Ok(response)
     }
 
     /// Call a remote interface function

@@ -116,8 +116,11 @@ impl FactorioBridge {
         // Connect to RCON
         self.rcon.connect().await?;
 
-        // Query game version
-        let version_response = self.rcon.lua("game.active_mods['base']").await?;
+        // Query game version (use rcon.print to get output)
+        let version_response = self
+            .rcon
+            .lua("rcon.print(game.active_mods['base'])")
+            .await?;
         if !version_response.is_empty() {
             self.game_version = version_response.trim().to_string();
         }
@@ -125,7 +128,7 @@ impl FactorioBridge {
         // Check if GameRL mod is loaded
         let mod_check = self
             .rcon
-            .lua("remote.interfaces['gamerl'] and 'ok' or 'no'")
+            .lua("rcon.print(remote.interfaces['gamerl'] and 'ok' or 'no')")
             .await?;
 
         if !mod_check.contains("ok") {
@@ -135,7 +138,7 @@ impl FactorioBridge {
         }
 
         // Initialize mod
-        self.rcon.remote_call("gamerl", "init", "{}").await?;
+        self.rcon.remote_call("gamerl", "init", "").await?;
 
         // Ensure observation directory exists
         self.observer.ensure_dir().await?;

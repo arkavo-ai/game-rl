@@ -4,23 +4,25 @@
 //! - RimWorld via Unix socket (/tmp/gamerl-rimworld.sock)
 //! - Project Zomboid via file IPC (~/Zomboid/Lua/gamerl_response.json)
 //! - Factorio via RCON (localhost:27015)
+//!
+//! Detection checks all sources and picks the most recently active one.
 
 use anyhow::Result;
 use factorio_bridge::{FactorioBridge, FactorioConfig};
 use game_rl_server::{GameEnvironment, GameRLServer};
 use harmony_bridge::HarmonyBridge;
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio::net::TcpStream;
 use tokio::time::sleep;
-use tracing::{info, warn, Level};
+use tracing::{debug, info, warn, Level};
 use tracing_subscriber::FmtSubscriber;
 use zomboid_bridge::{ZomboidBridge, ZomboidConfig};
 
-enum DetectedGame {
-    RimWorld(HarmonyBridge),
-    Zomboid(ZomboidBridge),
-    Factorio(FactorioBridge),
+/// Candidate game with its freshness timestamp
+struct GameCandidate {
+    name: &'static str,
+    modified: SystemTime,
 }
 
 const RIMWORLD_SOCKET: &str = "/tmp/gamerl-rimworld.sock";
@@ -33,6 +35,11 @@ async fn run_with_bridge<E: GameEnvironment>(bridge: E) -> Result<()> {
     let server = GameRLServer::new(bridge, manifest);
     server.run_stdio().await?;
     Ok(())
+}
+
+/// Get file modification time, or None if file doesn't exist
+fn get_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
 }
 
 #[tokio::main]
@@ -51,51 +58,77 @@ async fn main() -> Result<()> {
     let zomboid_response = zomboid_config.ipc_path.join("gamerl_response.json");
     let factorio_config = FactorioConfig::default();
 
-    // Auto-detect game
-    let game = loop {
-        // Check RimWorld socket
-        if Path::new(RIMWORLD_SOCKET).exists() {
-            info!("RimWorld socket detected: {}", RIMWORLD_SOCKET);
-            let mut bridge = HarmonyBridge::new(RIMWORLD_SOCKET);
-            match bridge.connect().await {
-                Ok(()) => break DetectedGame::RimWorld(bridge),
-                Err(e) => warn!("RimWorld socket exists but connect failed: {}", e),
+    // Auto-detect game - check all sources and pick most recent
+    loop {
+        let mut candidates: Vec<GameCandidate> = Vec::new();
+
+        // Check all potential game sources
+        if let Some(mtime) = get_mtime(Path::new(RIMWORLD_SOCKET)) {
+            candidates.push(GameCandidate {
+                name: "RimWorld",
+                modified: mtime,
+            });
+        }
+
+        if let Some(mtime) = get_mtime(&zomboid_response) {
+            candidates.push(GameCandidate {
+                name: "Zomboid",
+                modified: mtime,
+            });
+        }
+
+        // For Factorio, check if RCON port is open (use current time as "freshness")
+        if TcpStream::connect(FACTORIO_RCON_ADDR).await.is_ok() {
+            candidates.push(GameCandidate {
+                name: "Factorio",
+                modified: SystemTime::now(), // Active connection = most fresh
+            });
+        }
+
+        // Sort by most recent first
+        candidates.sort_by(|a, b| b.modified.cmp(&a.modified));
+
+        // Try to connect to each candidate in order of freshness
+        for candidate in &candidates {
+            debug!("Trying {} (modified: {:?})", candidate.name, candidate.modified);
+
+            match candidate.name {
+                "RimWorld" => {
+                    info!("RimWorld socket detected: {}", RIMWORLD_SOCKET);
+                    let mut bridge = HarmonyBridge::new(RIMWORLD_SOCKET);
+                    match bridge.connect().await {
+                        Ok(()) => return run_with_bridge(bridge).await,
+                        Err(e) => warn!("RimWorld socket exists but connect failed: {}", e),
+                    }
+                }
+                "Zomboid" => {
+                    info!("Project Zomboid IPC detected: {:?}", zomboid_response);
+                    let mut bridge = ZomboidBridge::with_config(zomboid_config.clone());
+                    match bridge.init().await {
+                        Ok(()) => return run_with_bridge(bridge).await,
+                        Err(e) => warn!("Zomboid response exists but init failed: {}", e),
+                    }
+                }
+                "Factorio" => {
+                    info!("Factorio RCON detected at {}", FACTORIO_RCON_ADDR);
+                    let mut bridge = FactorioBridge::with_config(factorio_config.clone());
+                    match bridge.init().await {
+                        Ok(()) => return run_with_bridge(bridge).await,
+                        Err(e) => warn!("Factorio RCON exists but init failed: {}", e),
+                    }
+                }
+                _ => {}
             }
         }
 
-        // Check Zomboid response file (Lua writes Ready message here)
-        if zomboid_response.exists() {
-            info!("Project Zomboid IPC detected: {:?}", zomboid_response);
-            let mut bridge = ZomboidBridge::with_config(zomboid_config.clone());
-            match bridge.init().await {
-                Ok(()) => break DetectedGame::Zomboid(bridge),
-                Err(e) => warn!("Zomboid response exists but init failed: {}", e),
-            }
+        if candidates.is_empty() {
+            info!(
+                "Waiting for game... (RimWorld: {}, Zomboid: {:?}, Factorio: {})",
+                RIMWORLD_SOCKET, zomboid_response, FACTORIO_RCON_ADDR
+            );
+        } else {
+            info!("No game connected successfully, retrying...");
         }
-
-        // Check Factorio RCON
-        if let Ok(_stream) = TcpStream::connect(FACTORIO_RCON_ADDR).await {
-            info!("Factorio RCON detected at {}", FACTORIO_RCON_ADDR);
-            let mut bridge = FactorioBridge::with_config(factorio_config.clone());
-            match bridge.init().await {
-                Ok(()) => break DetectedGame::Factorio(bridge),
-                Err(e) => warn!("Factorio RCON exists but init failed: {}", e),
-            }
-        }
-
-        info!(
-            "Waiting for game... (RimWorld: {}, Zomboid: {:?}, Factorio: {})",
-            RIMWORLD_SOCKET, zomboid_response, FACTORIO_RCON_ADDR
-        );
         sleep(Duration::from_secs(2)).await;
-    };
-
-    // Run server with detected bridge
-    match game {
-        DetectedGame::RimWorld(bridge) => run_with_bridge(bridge).await?,
-        DetectedGame::Zomboid(bridge) => run_with_bridge(bridge).await?,
-        DetectedGame::Factorio(bridge) => run_with_bridge(bridge).await?,
     }
-
-    Ok(())
 }

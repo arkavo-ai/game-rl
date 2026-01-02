@@ -564,5 +564,3 @@ script.on_nth_tick(60, function(event)
         write_observation(obs)
     end
 end)
-
-game.print("[GameRL] Control script loaded v" .. VERSION)
