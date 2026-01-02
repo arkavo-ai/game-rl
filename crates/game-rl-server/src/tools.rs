@@ -23,19 +23,19 @@ pub fn list_tools() -> Vec<ToolDef> {
     vec![
         ToolDef {
             name: "register_agent".into(),
-            description: "Register an agent to control the game. MUST be called before sim_step. Example: {\"AgentId\": \"commander\", \"AgentType\": \"ColonyManager\"}".into(),
+            description: "Register an agent to control the game. MUST be called before sim_step. Example: {\"AgentId\": \"player1\", \"AgentType\": \"Controller\"}".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
                     "AgentId": {
                         "type": "string",
-                        "description": "Your agent's unique ID. Example: \"commander\" or \"agent-1\""
+                        "description": "Your agent's unique ID. Example: \"player1\" or \"factory-ai\""
                     },
                     "AgentType": {
                         "type": "string",
-                        "description": "Agent role type. Use \"ColonyManager\" for colony control.",
-                        "enum": ["ColonyManager", "EntityBehavior", "WorldSimulation", "GameMaster", "DialogueAgent", "CombatDirector"],
-                        "default": "ColonyManager"
+                        "description": "Agent role: Observer (watch only), Player (avatar control), Entity (single unit), Controller (strategic/factory), System (game systems), Director (narrative/events)",
+                        "enum": ["Observer", "Player", "Entity", "Controller", "System", "Director"],
+                        "default": "Controller"
                     },
                     "Config": {
                         "type": "object",
