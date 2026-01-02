@@ -866,6 +866,454 @@ local function execute_action(agent_id, action)
 
         return ok, ok and nil or ("Failed to connect wire: " .. tostring(err))
 
+    -- ========== TRAIN ACTIONS ==========
+
+    elseif action_type == "AddTrainSchedule" then
+        -- Add a station to a train's schedule
+        local train_id = action.train_id or action.TrainId
+        local station = action.station or action.Station
+        local wait_conditions = action.wait_conditions or action.WaitConditions
+
+        if not train_id or not station then
+            return false, "AddTrainSchedule requires train_id and station"
+        end
+
+        local surface = game.surfaces[1]
+
+        -- Find train by locomotive unit number
+        local train = nil
+        for _, loco in pairs(surface.find_entities_filtered{type = "locomotive"}) do
+            if loco.unit_number == train_id and loco.train then
+                train = loco.train
+                break
+            end
+        end
+
+        if not train then
+            return false, "Train not found"
+        end
+
+        local schedule = train.schedule or {current = 1, records = {}}
+        local new_record = {station = station}
+
+        -- Parse wait conditions
+        if wait_conditions then
+            new_record.wait_conditions = {}
+            for _, cond in pairs(wait_conditions) do
+                table.insert(new_record.wait_conditions, {
+                    type = cond.type or "time",
+                    compare_type = cond.compare_type or "and",
+                    ticks = cond.ticks or 1800,  -- 30 seconds default
+                })
+            end
+        else
+            -- Default: wait 30 seconds
+            new_record.wait_conditions = {{type = "time", compare_type = "and", ticks = 1800}}
+        end
+
+        table.insert(schedule.records, new_record)
+        train.schedule = schedule
+
+        return true, nil
+
+    elseif action_type == "ClearTrainSchedule" then
+        -- Clear a train's schedule
+        local train_id = action.train_id or action.TrainId
+
+        if not train_id then
+            return false, "ClearTrainSchedule requires train_id"
+        end
+
+        local surface = game.surfaces[1]
+
+        local train = nil
+        for _, loco in pairs(surface.find_entities_filtered{type = "locomotive"}) do
+            if loco.unit_number == train_id and loco.train then
+                train = loco.train
+                break
+            end
+        end
+
+        if not train then
+            return false, "Train not found"
+        end
+
+        train.schedule = nil
+        return true, nil
+
+    elseif action_type == "SetTrainManual" then
+        -- Toggle train between automatic and manual mode
+        local train_id = action.train_id or action.TrainId
+        local manual = action.manual or action.Manual
+
+        if not train_id then
+            return false, "SetTrainManual requires train_id"
+        end
+        if manual == nil then
+            manual = true
+        end
+
+        local surface = game.surfaces[1]
+
+        local train = nil
+        for _, loco in pairs(surface.find_entities_filtered{type = "locomotive"}) do
+            if loco.unit_number == train_id and loco.train then
+                train = loco.train
+                break
+            end
+        end
+
+        if not train then
+            return false, "Train not found"
+        end
+
+        train.manual_mode = manual
+        return true, nil
+
+    -- ========== MACHINE CONTROL ==========
+
+    elseif action_type == "SetEntityActive" then
+        -- Enable or disable a machine/entity
+        local entity_id = action.entity_id or action.EntityId
+        local active = action.active or action.Active
+
+        if not entity_id then
+            return false, "SetEntityActive requires entity_id"
+        end
+        if active == nil then
+            active = true
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local ok, err = pcall(function()
+            entity.active = active
+        end)
+
+        return ok, ok and nil or ("Failed to set active: " .. tostring(err))
+
+    elseif action_type == "SetCombinatorSignal" then
+        -- Set a constant combinator signal
+        local entity_id = action.entity_id or action.EntityId
+        local slot = action.slot or action.Slot or 1
+        local signal_type = action.signal_type or action.SignalType or "item"
+        local signal_name = action.signal or action.Signal
+        local count = action.count or action.Count or 1
+
+        if not entity_id then
+            return false, "SetCombinatorSignal requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force, type = "constant-combinator"}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Constant combinator not found"
+        end
+
+        local ok, err = pcall(function()
+            local behavior = entity.get_or_create_control_behavior()
+            if signal_name then
+                behavior.set_signal(slot, {
+                    signal = {type = signal_type, name = signal_name},
+                    count = count
+                })
+            else
+                behavior.set_signal(slot, nil)  -- Clear slot
+            end
+        end)
+
+        return ok, ok and nil or ("Failed to set signal: " .. tostring(err))
+
+    -- ========== BLUEPRINT ACTIONS ==========
+
+    elseif action_type == "CreateBlueprint" then
+        -- Create a blueprint from an area (returns blueprint string)
+        local position = action.position or action.Position
+        local radius = action.radius or action.Radius or 10
+
+        if not position then
+            return false, "CreateBlueprint requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local area = {
+            {position[1] - radius, position[2] - radius},
+            {position[1] + radius, position[2] + radius}
+        }
+
+        -- Create temporary blueprint item
+        local bp_stack = game.create_inventory(1)[1]
+        bp_stack.set_stack{name = "blueprint"}
+
+        local ok, err = pcall(function()
+            bp_stack.create_blueprint{
+                surface = surface,
+                force = force,
+                area = area,
+            }
+        end)
+
+        if ok and bp_stack.is_blueprint_setup() then
+            local bp_string = bp_stack.export_stack()
+            storage.gamerl.last_blueprint = bp_string
+            return true, nil
+        else
+            return false, "Failed to create blueprint: " .. tostring(err or "no entities in area")
+        end
+
+    elseif action_type == "PlaceBlueprint" then
+        -- Place a blueprint at a position
+        local position = action.position or action.Position
+        local blueprint_string = action.blueprint or action.Blueprint or storage.gamerl.last_blueprint
+        local direction = action.direction or action.Direction or 0
+
+        if not position then
+            return false, "PlaceBlueprint requires position"
+        end
+        if not blueprint_string then
+            return false, "PlaceBlueprint requires blueprint string (or use CreateBlueprint first)"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        -- Create temporary blueprint item
+        local bp_stack = game.create_inventory(1)[1]
+        bp_stack.set_stack{name = "blueprint"}
+
+        local ok, err = pcall(function()
+            bp_stack.import_stack(blueprint_string)
+        end)
+
+        if not ok then
+            return false, "Invalid blueprint string: " .. tostring(err)
+        end
+
+        -- Build the blueprint
+        local ghosts = bp_stack.build_blueprint{
+            surface = surface,
+            force = force,
+            position = {position[1], position[2]},
+            direction = direction,
+            force_build = true,
+        }
+
+        -- Revive ghosts immediately (instant build)
+        local built = 0
+        for _, ghost in pairs(ghosts) do
+            if ghost.valid then
+                local _, entity = ghost.revive()
+                if entity then built = built + 1 end
+            end
+        end
+
+        return built > 0, built > 0 and nil or "No entities built"
+
+    -- ========== UTILITY / TESTING ACTIONS ==========
+
+    elseif action_type == "Teleport" then
+        -- Teleport player character (for testing)
+        local position = action.position or action.Position
+        local player_index = action.player or action.Player or 1
+
+        if not position then
+            return false, "Teleport requires position"
+        end
+
+        local player = game.players[player_index]
+        if not player or not player.character then
+            return false, "Player not found or has no character"
+        end
+
+        local surface = game.surfaces[1]
+        local ok = player.character.teleport({position[1], position[2]}, surface)
+
+        return ok, ok and nil or "Failed to teleport"
+
+    elseif action_type == "UpgradeEntity" then
+        -- Mark an entity for upgrade to a different type
+        local entity_id = action.entity_id or action.EntityId
+        local target_type = action.target or action.Target
+
+        if not entity_id or not target_type then
+            return false, "UpgradeEntity requires entity_id and target"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        local ok, err = pcall(function()
+            entity.order_upgrade{
+                force = force,
+                target = target_type,
+            }
+        end)
+
+        return ok, ok and nil or ("Failed to order upgrade: " .. tostring(err))
+
+    elseif action_type == "RepairEntity" then
+        -- Instantly repair an entity to full health
+        local entity_id = action.entity_id or action.EntityId
+        local amount = action.amount or action.Amount  -- nil = full repair
+
+        if not entity_id then
+            return false, "RepairEntity requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        if not entity.health then
+            return false, "Entity has no health"
+        end
+
+        if amount then
+            entity.health = math.min(entity.max_health, entity.health + amount)
+        else
+            entity.health = entity.max_health
+        end
+
+        return true, nil
+
+    elseif action_type == "DamageEntity" then
+        -- Damage a player entity (for testing)
+        local entity_id = action.entity_id or action.EntityId
+        local damage = action.damage or action.Damage or 50
+
+        if not entity_id then
+            return false, "DamageEntity requires entity_id"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local entity = nil
+        for _, e in pairs(surface.find_entities_filtered{force = force}) do
+            if e.unit_number == entity_id then
+                entity = e
+                break
+            end
+        end
+
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        if not entity.health then
+            return false, "Entity has no health"
+        end
+
+        entity.damage(damage, game.forces.enemy, "physical")
+        return true, nil
+
+    elseif action_type == "ChartArea" then
+        -- Reveal/chart an area of the map (exploration)
+        local position = action.position or action.Position
+        local radius = action.radius or action.Radius or 32
+
+        if not position then
+            return false, "ChartArea requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local force = game.forces.player
+
+        local area = {
+            {position[1] - radius, position[2] - radius},
+            {position[1] + radius, position[2] + radius}
+        }
+
+        force.chart(surface, area)
+        return true, nil
+
+    elseif action_type == "SetSpeed" then
+        -- Set game speed (for fast-forward training)
+        local speed = action.speed or action.Speed or 1.0
+
+        game.speed = speed
+        return true, nil
+
+    elseif action_type == "SpawnResource" then
+        -- Spawn resource patches (for testing scenarios)
+        local position = action.position or action.Position
+        local resource_type = action.resource or action.Resource or "iron-ore"
+        local amount = action.amount or action.Amount or 1000000
+        local radius = action.radius or action.Radius or 5
+
+        if not position then
+            return false, "SpawnResource requires position"
+        end
+
+        local surface = game.surfaces[1]
+        local count = 0
+
+        for dx = -radius, radius do
+            for dy = -radius, radius do
+                if dx * dx + dy * dy <= radius * radius then
+                    local pos = {position[1] + dx, position[2] + dy}
+                    local existing = surface.find_entity(resource_type, pos)
+                    if not existing then
+                        local entity = surface.create_entity{
+                            name = resource_type,
+                            position = pos,
+                            amount = amount,
+                        }
+                        if entity then count = count + 1 end
+                    end
+                end
+            end
+        end
+
+        return count > 0, count > 0 and nil or "No resources spawned"
+
     else
         return false, "Unknown action type: " .. tostring(action_type)
     end
