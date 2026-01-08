@@ -310,7 +310,7 @@ mod tests {
 
         let msg = GameMessage::RegisterAgent {
             agent_id: "test".into(),
-            agent_type: game_rl_core::AgentType::ColonyManager,
+            agent_type: game_rl_core::AgentType::Controller,
             config: game_rl_core::AgentConfig::default(),
         };
         let json = serde_json::to_string(&msg).unwrap();
@@ -330,7 +330,7 @@ mod tests {
 
         assert_eq!(result.get::<String>("Type")?, "RegisterAgent");
         assert_eq!(result.get::<String>("AgentId")?, "test");
-        assert_eq!(result.get::<String>("AgentType")?, "ColonyManager");
+        assert_eq!(result.get::<String>("AgentType")?, "Controller");
 
         Ok(())
     }

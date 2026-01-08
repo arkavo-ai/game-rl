@@ -17,6 +17,7 @@ path = "src/main.rs"
 game-rl-server = { workspace = true }
 harmony-bridge = { workspace = true }
 zomboid-bridge = { workspace = true }
+factorio-bridge = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

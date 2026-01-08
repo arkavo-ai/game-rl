@@ -1,0 +1,11 @@
+{
+    "name": "gamerl",
+    "version": "0.5.0",
+    "title": "GameRL - AI Training Infrastructure",
+    "author": "Arkavo",
+    "contact": "info@arkavo.com",
+    "homepage": "https://github.com/arkavo-ai/game-rl",
+    "factorio_version": "2.0",
+    "description": "Multi-agent reinforcement learning infrastructure for Factorio. Enables AI agents to observe game state, execute actions, and train policies. SETUP: In main menu, Ctrl+Alt+Settings (Cmd+Option on Mac) → The rest → set local-rcon-socket=127.0.0.1:27015 and local-rcon-password=gamerl → then host multiplayer.",
+    "dependencies": ["base >= 2.0"]
+}
