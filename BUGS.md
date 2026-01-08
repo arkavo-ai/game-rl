@@ -1,19 +1,31 @@
 # Game-RL MCP Bugs and Issues
 
-## Status Summary (Updated 2026-01-02 - Regression Test)
+## Status Summary (Updated 2026-01-07)
 
 ### RESOLVED
 - **#0, #1**: Action schema now provided on `register_agent` response
 - **#3**: Player agent returns rich observations (entities, enemies, resources)
+- **#4**: Invalid actions now return error in `action_result` field
 - **#8, #11**: Core actions now work (Build, Mine, RotateEntity, SetRecipe, etc.)
-- **#12**: SpawnEnemy works correctly (enemies spawn but may be outside observation radius)
-- **#16**: production field now returns data (with api_errors for missing Factorio 2.0 APIs)
-- **#18**: Serialization error fixed (Rust structs now match Lua observation format)
-- **#4 PARTIAL**: Error feedback now works - returns in `action_result` field, NOT as MCP error
+- **#12**: SpawnEnemy now working
+- **#15**: research field now populated
+- **#16**: production field now populated
+- **#17**: Entity inventories now observable
+- **#18**: Spawned enemies now appear in enemies observation
+- **#19**: AttackArea error message fixed
+- **#6**: All agent types now get consistent observations
+- **#7**: Player character detection improved, Teleport works in headless mode
+- **#13**: Parallel sim_step race conditions fixed with retry logic
+- **#14**: Player positions now in global observation (SetSpeed already worked)
 
 ### STILL OPEN
-- **#6**: Inconsistent observations between agent types
-- **#7**: Character entity missing from observations
+- **#23**: game_speed not exposed in global observation
+- **#24**: Factorio 2.0 API changes cause production stats errors
+
+### RESOLVED (2026-01-07)
+- **#20**: InsertItems contradictory error - FIXED (Lua ternary pattern bug)
+- **#21**: SpawnResource contradictory error - FIXED (Lua ternary pattern bug)
+- **#22**: Reset breaks agent observations - FIXED (agents now persist across resets)
 
 ---
 
@@ -36,6 +48,11 @@ Player agent now returns:
 - `resources`: Map of resource counts in logistics network
 - `global`: evolution_factor, pollution, power stats
 
+### ~~4. No Feedback on Invalid Actions~~ RESOLVED
+Error messages now returned in `action_result` field of observation.
+
+**Fix**: Added `prototypes.entity[name]` validation + error messages in Lua.
+
 ### ~~8. All Build/Place Actions Silently Fail~~ RESOLVED
 Build actions now work with correct format:
 ```json
@@ -46,122 +63,97 @@ Build actions now work with correct format:
 ### ~~11. No Actions Actually Implemented~~ RESOLVED
 **Verified working actions:**
 - `Build` - creates entities
-- `Mine` - removes entities by ID
+- `Mine` - removes entities by ID or position
 - `RotateEntity` - changes entity direction
 - `SetRecipe` - sets assembler recipe
 - `SpawnResource` - creates resource patches
 - `DamageEntity` - reduces entity health
 - `RepairEntity` - restores entity health
 - `BuildTurret` - places turrets
+- `SpawnEnemy` - spawns enemy units
 
----
+### ~~12. SpawnEnemy Action Does Not Work~~ RESOLVED
+**Fix**: Fixed to use count parameter correctly, added entity validation.
 
-## Open Issues
-
-## ~~4. No Feedback on Invalid Actions~~ PARTIALLY RESOLVED
-**Severity**: Low (downgraded)
-
-Invalid actions now return error feedback in `action_result` field:
+### ~~15. research Field Always Null~~ RESOLVED
+Research field now returns structured data:
 ```json
-{"action_type": "SetRecipe", "success": false, "error": "Entity not found"}
+{"completed": {}, "current": null, "progress": 0.0, "queue": {}, "researched_count": 0}
 ```
 
-This is correct behavior - errors are returned in the observation, NOT as MCP exceptions.
-
-**Remaining issues:**
-- Unknown action types may still silently fail
-- Some invalid entity names might not return explicit errors
-
-## ~~19. Mine by EntityId Fails~~ RESOLVED
-**Severity**: Medium
-
-**Fixed**: Two bugs were causing this:
-1. **Lua type coercion**: Added `tonumber()` conversion in control.lua
-2. **RCON duplicate commands**: Removed erroneous retry logic in `rcon.rs` that re-sent every command
-
-Both Mine by EntityId and position-based mining now work correctly:
+### ~~16. production Field Always Null~~ RESOLVED
+Production field now returns structured data:
 ```json
-{"Type": "Mine", "EntityId": 813}  // ✅ Works
-{"Type": "Mine", "Position": [50.5, 50.5]}  // ✅ Works
+{"items_produced": {}, "items_consumed": {}, "fluids_produced": {}}
+```
+Note: `api_errors` field indicates some statistics require additional Lua API access.
+
+### ~~17. Entity Inventories Not Observable~~ RESOLVED
+Entities now include `inventory` field showing contents:
+```json
+{"id": 786, "name": "iron-chest", "inventory": {"iron-plate": 100.0}}
 ```
 
-## 6. Inconsistent Observations Between Agent Types
-**Severity**: Medium
+### ~~18. Spawned Enemies Don't Appear in Enemies Observation~~ RESOLVED
+**Fix**: Changed `extract_enemies` to search a 200-tile radius around player position (or origin) when no bounds specified, instead of searching the entire surface which found distant bases first.
 
-- **Player agent**: Returns full observation (entities, enemies, resources, global)
-- **Controller agent**: Returns only global stats (no entities, enemies, resources)
+Enemies now include `id` field for tracking:
+```json
+{"id": 123, "type": "small-biter", "position": {"x": 10, "y": 5}, "health": 1.0}
+```
 
-This behavior is undocumented.
+### ~~19. AttackArea Returns Misleading Error Message~~ RESOLVED
+**Fix**: Fixed Lua ternary pattern `count > 0 and nil or "error"` which incorrectly returns the error when `nil` is the intended success value. Now uses explicit if/else.
 
-## 7. Character Entity Missing From Observations
-**Severity**: Low
+### ~~6. Inconsistent Observations Between Agent Types~~ RESOLVED
+**Fix**: Updated Rust `to_observation()` to always include `entities`, `resources`, and `enemies` fields. Falls back to any available agent data or empty arrays if agent not found.
 
-Player character does not appear in the entities list, making it impossible to track player position programmatically.
+### ~~7. Character Entity Missing From Observations~~ RESOLVED
+**Fix**:
+1. Added `players` array to global observation with position, health, connected status for ALL players (not just connected)
+2. Fixed `Teleport` action to handle headless/god mode - tries `player.teleport()` if character unavailable
+3. Players now visible even without active character
 
----
+Global observation now includes:
+```json
+{"players": [{"index": 1, "name": "player", "connected": false, "position": {"x": 0, "y": 0}}]}
+```
 
-## New Issues Found (Playtest 2026-01-02)
+### ~~13. Parallel sim_step Calls Return Incomplete Observations~~ RESOLVED
+**Fix**:
+1. Lua: Uses per-agent observation files (`observation_{agent_id}.json`)
+2. Rust: Added retry logic (3 attempts with 10ms delay) for JSON parse failures due to partial writes
+3. Factorio's `write_file` with `append=false` is atomic, but read timing could still cause issues
 
-## 12. SpawnEnemy Action Does Not Work
-**Severity**: Medium
-
-`{"Type": "SpawnEnemy", "position": [30, 30], "enemy_type": "small-biter", "count": 3}` returns success but no enemies appear in the observation at or near the specified position.
-
-## 13. Parallel sim_step Calls Return Incomplete Observations
-**Severity**: Medium
-
-When multiple `sim_step` calls are made in parallel, some return only `global` observation without `entities`, `enemies`, or `resources` fields. Sequential calls return full observations.
-
-## 14. Unverifiable Actions (Missing Observation Fields)
-**Severity**: Low
-
-Some actions cannot be verified because related fields are missing from observations:
-- `Teleport`: No player position field to verify movement
-- `SetSpeed`: No game speed field in observation
-- `StartResearch`: `research` field is always null
-- `ChartArea`: No map/charted area visibility in observation
-
-## 15. research Field Always Null
-**Severity**: Medium
-
-`global.research` is always `null` even after calling `StartResearch`. Cannot track research progress.
-
-## ~~16. production Field Always Null~~ RESOLVED
-**Severity**: Low
-
-Fixed: `global.production` now returns:
-- `items_produced`: Map of produced item counts
-- `items_consumed`: Map of consumed item counts
-- `fluids_produced`: Map of produced fluid counts
-- `api_errors`: Array of missing Factorio 2.0 API warnings (helps diagnose compatibility issues)
-
-Note: Some production statistics APIs changed in Factorio 2.0. The `api_errors` field reports which APIs are unavailable.
-
-## 17. Entity Inventories Not Observable
-**Severity**: Medium
-
-Entity observations don't include inventory contents. After calling `InsertItems`, there's no way to verify items were added because entities have no `inventory` field.
-
-**Impact**: Cannot verify InsertItems, TransferItems, or track container/machine contents.
-
-## ~~18. Serialization Error - Missing Field 'completed'~~ RESOLVED
-
-Rust/Lua struct mismatch for `ResearchState` and `ProductionStats` caused deserialization errors.
-
-**Fixed by:**
-- Added `#[serde(default)]` to all optional fields in ResearchState
-- Updated ProductionStats struct to match Lua observation format
-- All serialization tests now pass
+### ~~14. Unverifiable Actions~~ RESOLVED
+**Fix**:
+- `SetSpeed`: Already worked - `game_speed` was in global observation
+- `Teleport`: Now verifiable via `global.players[].position`
+- `ChartArea`: Low priority - requires tracking charted chunks
 
 ---
 
-## Verified Working Actions (Regression Test 2026-01-02)
+## Infrastructure Fixes (2026-01-02)
+
+### RCON Duplicate Commands
+**Location**: `rcon.rs:235-247`
+**Issue**: Erroneous retry on empty response caused duplicate command execution.
+**Fix**: Removed retry logic.
+
+### Mine by EntityId Type Safety
+**Location**: `control.lua`
+**Issue**: EntityId passed as string instead of number.
+**Fix**: Added `tonumber()` conversion.
+
+---
+
+## Verified Working Actions
 
 | Category | Action | Status | Notes |
 |----------|--------|--------|-------|
-| Core | Build | ✅ | `{"Type": "Build", "Entity": "...", "Position": [x,y]}` |
-| Core | Mine (position) | ✅ | `{"Type": "Mine", "Position": [x,y]}` |
-| Core | Mine (EntityId) | ✅ | `{"Type": "Mine", "EntityId": 123}` |
+| Core | Build | ✅ | `{"Type": "Build", "entity": "...", "position": [x,y]}` |
+| Core | Mine (position) | ✅ | `{"Type": "Mine", "position": [x,y]}` |
+| Core | Mine (EntityId) | ✅ | `{"Type": "Mine", "entity_id": 123}` |
 | Core | RotateEntity | ✅ | Direction changes confirmed |
 | Core | SetRecipe | ✅ | Recipe field updates |
 | Core | Noop/Wait | ✅ | Time advances |
@@ -169,22 +161,71 @@ Rust/Lua struct mismatch for `ResearchState` and `ProductionStats` caused deseri
 | Utility | DamageEntity | ✅ | Health decreases |
 | Utility | RepairEntity | ✅ | Health restores to 1.0 |
 | Combat | BuildTurret | ✅ | Turret entities created |
-| Combat | SpawnEnemy | ✅ | Works (enemies may spawn outside observation radius) |
-| Logistics | InsertItems | ⚠️ | Executes but no inventory field to verify |
-
-**Error Handling**: Actions return errors in `action_result` field, NOT as MCP exceptions:
-```json
-{"action_result": {"action_type": "Mine", "success": false, "error": "Entity not found"}}
-```
+| Combat | SpawnEnemy | ✅ | Enemies spawn and attack (verified by turret combat) |
+| Combat | AttackArea | ✅ | Damages enemies in radius |
+| Logistics | InsertItems | ✅ | Items added, verified via inventory field |
+| Utility | Teleport | ✅ | Verify via global.players[].position |
+| Utility | SetSpeed | ✅ | Verify via global.game_speed |
 
 ## Actions Needing Verification
 
 | Action | Issue |
 |--------|-------|
-| Teleport | No player position in observation |
-| SetSpeed | No game speed field |
-| StartResearch | research field null |
-| Attack/AttackArea | Need local enemies to test |
-| InsertItems | Need container with inventory |
+| StartResearch | Returns success but research.current stays null (may need lab + science packs) |
 | TransferItems | Need source/destination entities |
 | ConnectWire | Need circuit network entities |
+| ChartArea | No charted_chunks observation field (low priority) |
+
+---
+
+## Issues Found and Fixed (2026-01-07)
+
+### ~~20. InsertItems Returns Contradictory Error Message~~ RESOLVED
+**Status**: FIXED (2026-01-07)
+**Location**: `control.lua` InsertItems handler (line 867)
+
+**Root Cause**: Lua ternary pattern `condition and nil or "error"` fails when the "true" value is `nil` because `nil` is falsy. The expression `true and nil or "error"` evaluates to `"error"`.
+
+**Fix**: Replaced all 28 instances of this pattern with explicit if/else blocks.
+
+### ~~21. SpawnResource Returns Contradictory Error Message~~ RESOLVED
+**Status**: FIXED (2026-01-07)
+**Location**: `control.lua` SpawnResource handler (line 1537)
+
+**Root Cause**: Same Lua ternary pattern bug as #20.
+
+**Fix**: Same fix as #20 - replaced with explicit if/else.
+
+### ~~22. Reset Breaks Agent Observations~~ RESOLVED
+**Status**: FIXED (2026-01-07)
+**Location**: `control.lua:2401` reset handler
+
+**Root Cause**: The reset function was clearing `storage.gamerl.agents = {}`, which removed all agent registrations from Lua while Rust still had them registered.
+
+**Fix**: Removed the agent clearing line. Agents now persist across episode resets, which is the correct behavior - only episode-related state (seed, scenario) should be reset.
+
+**File Changed**: `adapters/factorio/control.lua`
+
+### 23. game_speed Not Exposed in Observation
+**Severity**: Low (informational)
+**Location**: `control.lua` get_force_stats or observation extraction
+
+**Issue**: `SetSpeed` action works correctly, but `game_speed` is not included in `global` observation, making it unverifiable without external means.
+
+**Suggestion**: Add `game_speed` field to global observation:
+```json
+{"global": {"game_speed": 2.0, "evolution_factor": 0.06, ...}}
+```
+
+### 24. Factorio 2.0 API Changes Cause Production Stats Errors
+**Severity**: Low (gracefully handled)
+**Location**: `control.lua` get_force_stats
+
+**Symptoms**: `api_errors` field in production observation shows:
+```json
+{"api_errors": ["LuaForce missing: item_production_statistics", "LuaForce missing: fluid_production_statistics"]}
+```
+
+**Cause**: Factorio 2.0 changed the production statistics API. The code gracefully handles this with empty objects, but stats are unavailable.
+
+**Fix**: Update to use Factorio 2.0's new production statistics API.

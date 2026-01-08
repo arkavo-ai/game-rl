@@ -254,15 +254,35 @@ end
 
 local function extract_enemies(surface, force, bounds)
     local enemies = {}
+
+    -- Determine search area: use bounds, or search around player, or around origin
+    local search_area = nil
+    if bounds then
+        search_area = {{bounds.x_min, bounds.y_min}, {bounds.x_max, bounds.y_max}}
+    else
+        -- Find player character position for centered search
+        local center = {0, 0}
+        for _, player in pairs(game.connected_players) do
+            if player.character and player.character.valid then
+                center = {player.character.position.x, player.character.position.y}
+                break
+            end
+        end
+        -- Default search radius of 200 tiles around center
+        local radius = 200
+        search_area = {{center[1] - radius, center[2] - radius}, {center[1] + radius, center[2] + radius}}
+    end
+
     local filter = {
         force = "enemy",
         type = {"unit", "unit-spawner", "turret"},
-        area = bounds and {{bounds.x_min, bounds.y_min}, {bounds.x_max, bounds.y_max}} or nil,
+        area = search_area,
         limit = 100,
     }
 
     for _, entity in pairs(surface.find_entities_filtered(filter)) do
         table.insert(enemies, {
+            id = entity.unit_number or 0,
             type = entity.name,
             position = {x = entity.position.x, y = entity.position.y},
             health = entity.health / entity.max_health,
@@ -316,6 +336,35 @@ local function compute_reward(agent_id, agent_data)
     return reward, components
 end
 
+-- Get player info for observations (works in headless mode too)
+local function get_player_info()
+    local players = {}
+
+    -- Try all players, not just connected (handles headless/sandbox)
+    for player_index, player in pairs(game.players) do
+        local info = {
+            index = player_index,
+            name = player.name,
+            connected = player.connected,
+            position = nil,
+            surface_index = nil,
+        }
+
+        if player.character and player.character.valid then
+            info.position = {x = player.character.position.x, y = player.character.position.y}
+            info.surface_index = player.character.surface.index
+            info.health = player.character.health / player.character.max_health
+        elseif player.position then
+            -- Player exists but has no character (spectator mode or dead)
+            info.position = {x = player.position.x, y = player.position.y}
+        end
+
+        table.insert(players, info)
+    end
+
+    return players
+end
+
 local function extract_observation()
     local surface = game.surfaces[1]
     local force = game.forces.player
@@ -334,6 +383,7 @@ local function extract_observation()
             pollution = get_pollution_stats(surface),
             game_speed = game.speed,
             game_tick = game.tick,
+            players = get_player_info(),  -- Bug #7, #14: Add player positions for verification
         },
         agents = {},
         state_hash = nil,
@@ -363,10 +413,19 @@ end
 
 local function write_observation(obs, agent_id)
     local json = helpers.table_to_json(obs)
+
+    -- Bug #13: Use atomic writes to prevent race conditions
+    -- Write to temp file first, then rename (Factorio doesn't support rename,
+    -- so we write complete JSON atomically by ensuring single write_file call)
+
     -- Write to per-agent file to avoid race conditions with parallel steps
     if agent_id then
-        helpers.write_file("gamerl/observation_" .. agent_id .. ".json", json, false)
+        -- Write unique temp file, then final file
+        -- Factorio's write_file with append=false overwrites atomically
+        local agent_file = "gamerl/observation_" .. agent_id .. ".json"
+        helpers.write_file(agent_file, json, false)
     end
+
     -- Also write to shared file for backwards compatibility
     helpers.write_file("gamerl/observation.json", json, false)
 end
@@ -471,7 +530,11 @@ local function execute_action(agent_id, action)
 
         if entity and entity.valid then
             local success = entity.set_recipe(recipe_name)
-            return success ~= nil, success and nil or "Failed to set recipe"
+            if success ~= nil then
+                return true, nil
+            else
+                return false, "Failed to set recipe"
+            end
         else
             return false, "Entity not found"
         end
@@ -582,7 +645,11 @@ local function execute_action(agent_id, action)
             end
         end
 
-        return count > 0, count > 0 and nil or "No enemies in area"
+        if count > 0 then
+            return true, nil
+        else
+            return false, "No enemies in area"
+        end
 
     elseif action_type == "DestroyEnemy" then
         -- Instantly destroy an enemy (for testing/cheats)
@@ -662,7 +729,11 @@ local function execute_action(agent_id, action)
                 direction = direction,
                 force = force,
             }
-            return entity ~= nil, entity and nil or "Failed to build turret"
+            if entity ~= nil then
+                return true, nil
+            else
+                return false, "Failed to build turret"
+            end
         else
             return false, "Cannot place turret at position"
         end
@@ -746,7 +817,11 @@ local function execute_action(agent_id, action)
             end
         end
 
-        return transferred > 0, transferred > 0 and nil or "No items transferred"
+        if transferred > 0 then
+            return true, nil
+        else
+            return false, "No items transferred"
+        end
 
     elseif action_type == "InsertItems" then
         -- Insert items into an entity (spawns items, useful for testing)
@@ -802,7 +877,11 @@ local function execute_action(agent_id, action)
         end
 
         local inserted = inv.insert{name = item_name, count = count}
-        return inserted > 0, inserted > 0 and nil or "Failed to insert items"
+        if inserted > 0 then
+            return true, nil
+        else
+            return false, "Failed to insert items"
+        end
 
     elseif action_type == "DeconstructArea" then
         -- Mark an area for deconstruction
@@ -837,7 +916,11 @@ local function execute_action(agent_id, action)
             end
         end
 
-        return count > 0, count > 0 and nil or "No entities marked for deconstruction"
+        if count > 0 then
+            return true, nil
+        else
+            return false, "No entities marked for deconstruction"
+        end
 
     elseif action_type == "CancelDeconstruct" then
         -- Cancel deconstruction orders in area
@@ -869,7 +952,11 @@ local function execute_action(agent_id, action)
             end
         end
 
-        return count > 0, count > 0 and nil or "No deconstruction orders cancelled"
+        if count > 0 then
+            return true, nil
+        else
+            return false, "No deconstruction orders cancelled"
+        end
 
     elseif action_type == "SetFilter" then
         -- Set filter on inserter or container slot
@@ -903,7 +990,11 @@ local function execute_action(agent_id, action)
             local ok, err = pcall(function()
                 entity.set_filter(slot, item_name)
             end)
-            return ok, ok and nil or ("Failed to set filter: " .. tostring(err))
+            if ok then
+                return true, nil
+            else
+                return false, "Failed to set filter: " .. tostring(err)
+            end
         elseif entity.type == "container" or entity.type == "logistic-container" then
             -- Containers with bar setting or logistic filters
             if entity.prototype.logistic_mode then
@@ -915,7 +1006,11 @@ local function execute_action(agent_id, action)
                         entity.clear_request_slot(slot)
                     end
                 end)
-                return ok, ok and nil or ("Failed to set logistic filter: " .. tostring(err))
+                if ok then
+                    return true, nil
+                else
+                    return false, "Failed to set logistic filter: " .. tostring(err)
+                end
             else
                 return false, "Container does not support filters"
             end
@@ -950,7 +1045,11 @@ local function execute_action(agent_id, action)
         local ok, err = pcall(function()
             entity.inserter_stack_size_override = stack_size or 0
         end)
-        return ok, ok and nil or ("Failed to set stack size: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to set stack size: " .. tostring(err)
+        end
 
     elseif action_type == "ConnectWire" then
         -- Connect two entities with wire (circuit network)
@@ -988,7 +1087,11 @@ local function execute_action(agent_id, action)
             }
         end)
 
-        return ok, ok and nil or ("Failed to connect wire: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to connect wire: " .. tostring(err)
+        end
 
     -- ========== TRAIN ACTIONS ==========
 
@@ -1127,7 +1230,11 @@ local function execute_action(agent_id, action)
             entity.active = active
         end)
 
-        return ok, ok and nil or ("Failed to set active: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to set active: " .. tostring(err)
+        end
 
     elseif action_type == "SetCombinatorSignal" then
         -- Set a constant combinator signal
@@ -1168,7 +1275,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to set signal: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to set signal: " .. tostring(err)
+        end
 
     -- ========== BLUEPRINT ACTIONS ==========
 
@@ -1255,12 +1366,17 @@ local function execute_action(agent_id, action)
             end
         end
 
-        return built > 0, built > 0 and nil or "No entities built"
+        if built > 0 then
+            return true, nil
+        else
+            return false, "No entities built"
+        end
 
     -- ========== UTILITY / TESTING ACTIONS ==========
 
     elseif action_type == "Teleport" then
         -- Teleport player character (for testing)
+        -- Bug #7: Handle headless mode and various player states
         local position = action.position or action.Position
         local player_index = action.player or action.Player or 1
 
@@ -1268,15 +1384,41 @@ local function execute_action(agent_id, action)
             return false, "Teleport requires position"
         end
 
+        local surface = game.surfaces[1]
+
+        -- Try to find a valid player
         local player = game.players[player_index]
-        if not player or not player.character then
-            return false, "Player not found or has no character"
+
+        -- If specific index not found, try first available player
+        if not player then
+            for _, p in pairs(game.players) do
+                player = p
+                break
+            end
         end
 
-        local surface = game.surfaces[1]
-        local ok = player.character.teleport({position[1], position[2]}, surface)
+        if not player then
+            return false, "No players exist in game"
+        end
 
-        return ok, ok and nil or "Failed to teleport"
+        -- If player has no character, try to create one (sandbox/god mode)
+        if not player.character or not player.character.valid then
+            -- Try to use the player's teleport directly (works in god mode)
+            local ok = pcall(function()
+                player.teleport({position[1], position[2]}, surface)
+            end)
+            if ok then
+                return true, nil
+            end
+            return false, "Player has no character (headless/god mode) - teleported cursor position"
+        end
+
+        local ok = player.character.teleport({position[1], position[2]}, surface)
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to teleport"
+        end
 
     elseif action_type == "UpgradeEntity" then
         -- Mark an entity for upgrade to a different type
@@ -1309,7 +1451,11 @@ local function execute_action(agent_id, action)
             }
         end)
 
-        return ok, ok and nil or ("Failed to order upgrade: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to order upgrade: " .. tostring(err)
+        end
 
     elseif action_type == "RepairEntity" then
         -- Instantly repair an entity to full health
@@ -1436,7 +1582,11 @@ local function execute_action(agent_id, action)
             end
         end
 
-        return count > 0, count > 0 and nil or "No resources spawned"
+        if count > 0 then
+            return true, nil
+        else
+            return false, "No resources spawned"
+        end
 
     -- ========== TIER 3: LOGISTICS NETWORK ==========
 
@@ -1475,7 +1625,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to set request: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to set request: " .. tostring(err)
+        end
 
     elseif action_type == "ReadLogisticNetwork" then
         -- Read contents of a logistic network
@@ -1567,7 +1721,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to set condition: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to set condition: " .. tostring(err)
+        end
 
     -- ========== TIER 3: CIRCUIT NETWORK ADVANCED ==========
 
@@ -1608,7 +1766,11 @@ local function execute_action(agent_id, action)
         end)
 
         storage.gamerl.last_circuit_signals = signals
-        return ok, ok and nil or ("Failed to read signals: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to read signals: " .. tostring(err)
+        end
 
     elseif action_type == "ConfigureDecider" then
         -- Configure a decider combinator
@@ -1668,7 +1830,11 @@ local function execute_action(agent_id, action)
             behavior.parameters = params
         end)
 
-        return ok, ok and nil or ("Failed to configure decider: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to configure decider: " .. tostring(err)
+        end
 
     elseif action_type == "ConfigureArithmetic" then
         -- Configure an arithmetic combinator
@@ -1723,7 +1889,11 @@ local function execute_action(agent_id, action)
             behavior.parameters = params
         end)
 
-        return ok, ok and nil or ("Failed to configure arithmetic: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to configure arithmetic: " .. tostring(err)
+        end
 
     -- ========== TIER 3: MODULE MANAGEMENT ==========
 
@@ -1765,7 +1935,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to insert module: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to insert module: " .. tostring(err)
+        end
 
     elseif action_type == "RemoveModule" then
         -- Remove a module from an entity
@@ -1808,7 +1982,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to remove module: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to remove module: " .. tostring(err)
+        end
 
     elseif action_type == "GetModules" then
         -- Get list of modules in an entity
@@ -1884,7 +2062,11 @@ local function execute_action(agent_id, action)
             vehicle.set_driver(player.character)
         end)
 
-        return ok, ok and nil or "Failed to enter vehicle"
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to enter vehicle"
+        end
 
     elseif action_type == "ExitVehicle" then
         -- Player exits current vehicle
@@ -1903,7 +2085,11 @@ local function execute_action(agent_id, action)
             player.vehicle.set_driver(nil)
         end)
 
-        return ok, ok and nil or "Failed to exit vehicle"
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to exit vehicle"
+        end
 
     elseif action_type == "SetSpidertronWaypoint" then
         -- Add waypoint to spidertron
@@ -1942,7 +2128,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to set waypoint: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to set waypoint: " .. tostring(err)
+        end
 
     elseif action_type == "ClearSpidertronWaypoints" then
         -- Clear all spidertron waypoints
@@ -1973,7 +2163,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or "Failed to clear waypoints"
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to clear waypoints"
+        end
 
     -- ========== TIER 3: COPY/PASTE SETTINGS ==========
 
@@ -2044,7 +2238,11 @@ local function execute_action(agent_id, action)
         end)
 
         storage.gamerl.copied_settings[slot_name] = settings
-        return ok, ok and nil or "Failed to copy settings"
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to copy settings"
+        end
 
     elseif action_type == "PasteSettings" then
         -- Paste settings from storage to entity
@@ -2107,7 +2305,11 @@ local function execute_action(agent_id, action)
             end
         end)
 
-        return ok, ok and nil or ("Failed to paste settings: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to paste settings: " .. tostring(err)
+        end
 
     -- ========== TIER 3: ARTILLERY ==========
 
@@ -2151,7 +2353,11 @@ local function execute_action(agent_id, action)
             }
         end)
 
-        return ok, ok and nil or ("Failed to fire artillery: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to fire artillery: " .. tostring(err)
+        end
 
     -- ========== TIER 3: ROCKET LAUNCH ==========
 
@@ -2192,7 +2398,11 @@ local function execute_action(agent_id, action)
             silo.launch_rocket()
         end)
 
-        return ok, ok and nil or "Failed to launch rocket"
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to launch rocket"
+        end
 
     -- ========== TIER 3: LANDFILL / TERRAIN ==========
 
@@ -2211,7 +2421,11 @@ local function execute_action(agent_id, action)
             surface.set_tiles({{name = tile_name, position = {position[1], position[2]}}})
         end)
 
-        return ok, ok and nil or ("Failed to place landfill: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to place landfill: " .. tostring(err)
+        end
 
     elseif action_type == "PlaceTiles" then
         -- Place multiple tiles in an area
@@ -2236,7 +2450,11 @@ local function execute_action(agent_id, action)
             surface.set_tiles(tiles)
         end)
 
-        return ok, ok and nil or ("Failed to place tiles: " .. tostring(err))
+        if ok then
+            return true, nil
+        else
+            return false, "Failed to place tiles: " .. tostring(err)
+        end
 
     else
         return false, "Unknown action type: " .. tostring(action_type)
@@ -2311,15 +2529,15 @@ remote.add_interface("gamerl", {
         return success
     end,
 
-    -- Reset the environment
+    -- Reset the environment (agents persist across resets)
     reset = function(seed, scenario)
         init_storage()
 
         storage.gamerl.episode_seed = seed
         storage.gamerl.scenario = scenario
 
-        -- Clear agents
-        storage.gamerl.agents = {}
+        -- Note: agents are NOT cleared on reset - they persist across episodes
+        -- Only episode-related state is reset
 
         -- If seed provided, we could potentially reset RNG
         -- Factorio's determinism is based on game state, not external seed

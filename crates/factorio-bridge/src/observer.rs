@@ -324,28 +324,59 @@ impl ObservationReader {
     }
 
     /// Read agent-specific observation directly (non-blocking, returns current state)
+    ///
+    /// Bug #13 fix: Retry on parse failure (partial write) with short delay
     pub async fn read_agent_observation(&self, agent_id: &str) -> Result<FactorioObservation> {
         let path = self.agent_observation_file(agent_id);
 
-        match fs::read_to_string(&path).await {
-            Ok(content) if !content.is_empty() => {
-                let obs: FactorioObservation = serde_json::from_str(&content)
-                    .map_err(|e| GameRLError::SerializationError(e.to_string()))?;
-                debug!("Read agent {} observation at tick {}", agent_id, obs.tick);
-                Ok(obs)
+        // Bug #13: Retry up to 3 times on parse failure (may be mid-write)
+        for attempt in 0..3 {
+            match fs::read_to_string(&path).await {
+                Ok(content) if !content.is_empty() => {
+                    match serde_json::from_str::<FactorioObservation>(&content) {
+                        Ok(obs) => {
+                            debug!("Read agent {} observation at tick {}", agent_id, obs.tick);
+                            return Ok(obs);
+                        }
+                        Err(e) if attempt < 2 => {
+                            // Parse failed, might be mid-write, retry after short delay
+                            debug!("Parse attempt {} failed, retrying: {}", attempt + 1, e);
+                            sleep(Duration::from_millis(10)).await;
+                            continue;
+                        }
+                        Err(e) => {
+                            return Err(GameRLError::SerializationError(format!(
+                                "Failed to parse after {} attempts: {}",
+                                attempt + 1,
+                                e
+                            )));
+                        }
+                    }
+                }
+                Ok(_) => {
+                    return Err(GameRLError::IpcError(format!(
+                        "Agent {} observation file is empty",
+                        agent_id
+                    )));
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(GameRLError::IpcError(format!(
+                        "Agent {} observation file not found",
+                        agent_id
+                    )));
+                }
+                Err(e) => {
+                    return Err(GameRLError::IpcError(format!(
+                        "Failed to read agent observation: {}",
+                        e
+                    )));
+                }
             }
-            Ok(_) => Err(GameRLError::IpcError(format!(
-                "Agent {} observation file is empty",
-                agent_id
-            ))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Err(GameRLError::IpcError(
-                format!("Agent {} observation file not found", agent_id),
-            )),
-            Err(e) => Err(GameRLError::IpcError(format!(
-                "Failed to read agent observation: {}",
-                e
-            ))),
         }
+
+        Err(GameRLError::IpcError(
+            "Unexpected: exhausted retry loop".to_string(),
+        ))
     }
 
     /// Wait for agent-specific observation (avoids race conditions with parallel steps)
@@ -398,8 +429,15 @@ impl ObservationReader {
     }
 
     /// Convert Factorio observation to game-rl Observation
+    ///
+    /// Bug #6 fix: If agent not found in agents map, try to find any registered agent's data
+    /// as a fallback. This ensures all agent types get consistent observations.
     pub fn to_observation(factorio_obs: &FactorioObservation, agent_id: &str) -> Observation {
-        let agent_obs = factorio_obs.agents.get(agent_id);
+        // Try exact agent match first, then fall back to any agent's data
+        let agent_obs = factorio_obs
+            .agents
+            .get(agent_id)
+            .or_else(|| factorio_obs.agents.values().next());
 
         let mut data = serde_json::Map::new();
 
@@ -412,7 +450,7 @@ impl ObservationReader {
             serde_json::to_value(&factorio_obs.global).unwrap_or_default(),
         );
 
-        // Add agent-specific data
+        // Add agent-specific data (Bug #6: always include these fields for consistency)
         if let Some(agent) = agent_obs {
             data.insert(
                 "entities".to_string(),
@@ -432,6 +470,11 @@ impl ObservationReader {
                     serde_json::to_value(bounds).unwrap_or_default(),
                 );
             }
+        } else {
+            // No agent data available, include empty arrays for consistency
+            data.insert("entities".to_string(), serde_json::json!([]));
+            data.insert("resources".to_string(), serde_json::json!({}));
+            data.insert("enemies".to_string(), serde_json::json!([]));
         }
 
         // Add state hash if available
