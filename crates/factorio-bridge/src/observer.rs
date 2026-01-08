@@ -4,8 +4,50 @@
 //! to the `script-output/gamerl/` directory.
 
 use game_rl_core::{GameRLError, Observation, Result};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
+
+/// Custom deserializer that handles Lua's empty table {} being serialized as object instead of array.
+/// This is needed because in Lua, an empty table {} serializes as JSON {} (object) not [] (array).
+fn deserialize_vec_or_empty_object<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: DeserializeOwned,
+{
+    use serde::de::Error;
+
+    let value: serde_json::Value = Deserialize::deserialize(deserializer)?;
+
+    match value {
+        serde_json::Value::Array(arr) => {
+            // Normal case: it's an array
+            arr.into_iter()
+                .map(|v| serde_json::from_value(v).map_err(D::Error::custom))
+                .collect()
+        }
+        serde_json::Value::Object(obj) if obj.is_empty() => {
+            // Lua empty table {} case
+            Ok(Vec::new())
+        }
+        serde_json::Value::Object(obj) => {
+            // Lua indexed table {1: x, 2: y} case - convert to array
+            let mut items: Vec<(usize, serde_json::Value)> = obj
+                .into_iter()
+                .filter_map(|(k, v)| k.parse::<usize>().ok().map(|i| (i, v)))
+                .collect();
+            items.sort_by_key(|(i, _)| *i);
+            items
+                .into_iter()
+                .map(|(_, v)| serde_json::from_value(v).map_err(D::Error::custom))
+                .collect()
+        }
+        serde_json::Value::Null => {
+            // Null case - treat as empty
+            Ok(Vec::new())
+        }
+        _ => Err(D::Error::custom("expected array, object, or null")),
+    }
+}
 use std::path::PathBuf;
 use tokio::fs;
 use tokio::time::{Duration, sleep};
@@ -180,7 +222,8 @@ pub struct AgentObservation {
     pub bounds: Option<Bounds>,
 
     /// Entities in the agent's observation area
-    #[serde(default)]
+    /// Uses custom deserializer to handle Lua empty table {} vs array []
+    #[serde(default, deserialize_with = "deserialize_vec_or_empty_object")]
     pub entities: Vec<EntityState>,
 
     /// Resources in area
@@ -188,7 +231,8 @@ pub struct AgentObservation {
     pub resources: HashMap<String, u64>,
 
     /// Nearby enemy units
-    #[serde(default)]
+    /// Uses custom deserializer to handle Lua empty table {} vs array []
+    #[serde(default, deserialize_with = "deserialize_vec_or_empty_object")]
     pub enemies: Vec<EnemyState>,
 
     /// Agent-specific reward components
