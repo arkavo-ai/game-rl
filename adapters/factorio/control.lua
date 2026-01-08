@@ -230,7 +230,7 @@ local function extract_entities(surface, force, bounds)
     for _, player in pairs(game.connected_players) do
         if player.character and player.character.valid then
             local char = player.character
-            table.insert(entities, {
+            local char_info = {
                 id = char.unit_number or 0,
                 type = "character",
                 name = "character",
@@ -238,7 +238,39 @@ local function extract_entities(surface, force, bounds)
                 direction = char.direction or 0,
                 health = char.health / char.max_health,
                 player_name = player.name,
-            })
+                player_index = player.index,
+            }
+
+            -- Add player inventory (for Player mode agents)
+            local inv = player.get_main_inventory()
+            if inv then
+                char_info.inventory = {}
+                char_info.inventory_size = #inv
+                char_info.inventory_free_slots = inv.count_empty_stacks()
+                for _, item in pairs(inv.get_contents()) do
+                    char_info.inventory[item.name] = item.count
+                end
+            end
+
+            -- Add crafting queue status
+            char_info.crafting_queue_size = player.crafting_queue_size or 0
+            if player.crafting_queue and #player.crafting_queue > 0 then
+                char_info.crafting_queue = {}
+                for i, item in ipairs(player.crafting_queue) do
+                    if i <= 5 then  -- Limit to first 5 entries
+                        table.insert(char_info.crafting_queue, {
+                            recipe = item.recipe,
+                            count = item.count,
+                        })
+                    end
+                end
+            end
+
+            -- Add reach distances
+            char_info.build_distance = char.build_distance
+            char_info.reach_distance = char.reach_distance
+
+            table.insert(entities, char_info)
         end
     end
 
@@ -431,6 +463,71 @@ local function write_observation(obs, agent_id)
 end
 
 -- ============================================================================
+-- Player Mode Helpers
+-- ============================================================================
+
+-- Get the bound player for an agent (Player agents bind to game.players[1] by default)
+local function get_agent_player(agent_id)
+    local agent = storage.gamerl and storage.gamerl.agents and storage.gamerl.agents[agent_id]
+    if agent and agent.agent_type == "Player" then
+        local p = agent.bound_player or game.players[1]
+        if p and p.character and p.character.valid then
+            return p
+        end
+    end
+    return nil
+end
+
+-- Check if agent is in player mode
+local function is_player_mode(agent_id)
+    local agent = storage.gamerl and storage.gamerl.agents and storage.gamerl.agents[agent_id]
+    return agent and agent.agent_type == "Player"
+end
+
+-- Check reach to position (using character's build_distance)
+local function player_can_reach_position(player, position)
+    if not player or not player.character then return false end
+    local c = player.character
+    local dx = position[1] - c.position.x
+    local dy = position[2] - c.position.y
+    return math.sqrt(dx * dx + dy * dy) <= c.build_distance
+end
+
+-- Check if player has items in main inventory
+local function player_has_items(player, item_name, count)
+    if not player then return false end
+    local inv = player.get_main_inventory()
+    if not inv then return false end
+    return inv.get_item_count(item_name) >= count
+end
+
+-- Consume items from player inventory
+local function player_consume_items(player, item_name, count)
+    if not player then return 0 end
+    local inv = player.get_main_inventory()
+    if not inv then return 0 end
+    return inv.remove{name = item_name, count = count}
+end
+
+-- Give items to player inventory
+local function player_give_items(player, item_name, count)
+    if not player then return 0 end
+    local inv = player.get_main_inventory()
+    if not inv then return 0 end
+    return inv.insert{name = item_name, count = count}
+end
+
+-- Get the item required to build an entity
+local function get_entity_build_item(entity_name)
+    local proto = prototypes.entity[entity_name]
+    if proto and proto.items_to_place_this and #proto.items_to_place_this > 0 then
+        return proto.items_to_place_this[1].name, 1
+    end
+    -- Fallback: assume item name matches entity name
+    return entity_name, 1
+end
+
+-- ============================================================================
 -- Action Execution
 -- ============================================================================
 
@@ -443,6 +540,13 @@ local function execute_action(agent_id, action)
 
     local surface = game.surfaces[1]
     local force = game.forces.player
+
+    -- Player mode detection: Player agents have realistic constraints
+    local player_mode = is_player_mode(agent_id)
+    local player = player_mode and get_agent_player(agent_id) or nil
+    if player_mode and not player then
+        return false, "Player agent has no bound character"
+    end
 
     if action_type == "Noop" or action_type == "Wait" then
         return true, nil
@@ -461,18 +565,45 @@ local function execute_action(agent_id, action)
             return false, "Unknown entity: " .. tostring(entity_name)
         end
 
-        -- Try to create entity directly (works in sandbox/creative mode even if can_place returns false)
-        local entity = surface.create_entity{
-            name = entity_name,
-            position = {position[1], position[2]},
-            direction = direction,
-            force = force,
-        }
+        if player_mode then
+            -- Player mode: check reach and consume items from inventory
+            if not player_can_reach_position(player, position) then
+                return false, "Position out of reach (build_distance=" .. tostring(player.character.build_distance) .. ")"
+            end
 
-        if entity and entity.valid then
-            return true, nil
+            local item_name, item_count = get_entity_build_item(entity_name)
+            if not player_has_items(player, item_name, item_count) then
+                return false, "Missing item: " .. item_name .. " (need " .. item_count .. ")"
+            end
+
+            -- Create entity, then consume items on success
+            local entity = surface.create_entity{
+                name = entity_name,
+                position = {position[1], position[2]},
+                direction = direction,
+                force = force,
+            }
+
+            if entity and entity.valid then
+                player_consume_items(player, item_name, item_count)
+                return true, nil
+            else
+                return false, "Cannot place " .. entity_name .. " at [" .. position[1] .. "," .. position[2] .. "]"
+            end
         else
-            return false, "Cannot place " .. entity_name .. " at [" .. position[1] .. "," .. position[2] .. "]"
+            -- God mode: create entity directly without resource checks
+            local entity = surface.create_entity{
+                name = entity_name,
+                position = {position[1], position[2]},
+                direction = direction,
+                force = force,
+            }
+
+            if entity and entity.valid then
+                return true, nil
+            else
+                return false, "Cannot place " .. entity_name .. " at [" .. position[1] .. "," .. position[2] .. "]"
+            end
         end
 
     elseif action_type == "Mine" then
@@ -504,11 +635,27 @@ local function execute_action(agent_id, action)
             entity = entities[1]
         end
 
-        if entity and entity.valid then
+        if not entity or not entity.valid then
+            return false, "Entity not found"
+        end
+
+        if player_mode then
+            -- Player mode: use player.mine_entity() for realistic mining
+            if not player.character.can_reach_entity(entity) then
+                return false, "Entity out of reach"
+            end
+
+            -- mine_entity returns true if successful, drops items to player inventory
+            local success = player.mine_entity(entity, false)  -- false = don't force
+            if success then
+                return true, nil
+            else
+                return false, "Cannot mine entity (may not be minable)"
+            end
+        else
+            -- God mode: instant destroy
             entity.destroy()
             return true, nil
-        else
-            return false, "Entity not found"
         end
 
     elseif action_type == "SetRecipe" then
@@ -861,6 +1008,16 @@ local function execute_action(agent_id, action)
             return false, "Destination entity not found"
         end
 
+        -- Player mode: check reach to both entities
+        if player_mode then
+            if not player.character.can_reach_entity(from_entity) then
+                return false, "Source entity out of reach"
+            end
+            if not player.character.can_reach_entity(to_entity) then
+                return false, "Destination entity out of reach"
+            end
+        end
+
         -- Map inventory type strings to defines
         local inv_map = {
             input = defines.inventory.assembling_machine_input or defines.inventory.furnace_source or defines.inventory.chest,
@@ -914,7 +1071,9 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "InsertItems" then
-        -- Insert items into an entity (spawns items, useful for testing)
+        -- Insert items into an entity
+        -- Player mode: transfers from player inventory
+        -- God mode: spawns items from nothing
         local entity_id = action.entity_id or action.EntityId
         local position = action.position or action.Position
         local item_name = action.item or action.Item
@@ -950,6 +1109,17 @@ local function execute_action(agent_id, action)
             return false, "Entity not found"
         end
 
+        -- Player mode: check reach and player inventory
+        if player_mode then
+            if not player.character.can_reach_entity(entity) then
+                return false, "Entity out of reach"
+            end
+            if not player_has_items(player, item_name, count) then
+                local have = player.get_main_inventory().get_item_count(item_name)
+                return false, "Not enough " .. item_name .. " (need " .. count .. ", have " .. have .. ")"
+            end
+        end
+
         -- Get appropriate inventory
         local inv = nil
         if inv_type == "fuel" then
@@ -958,6 +1128,10 @@ local function execute_action(agent_id, action)
             inv = entity.get_output_inventory()
         elseif inv_type == "lab" or inv_type == "lab_input" then
             inv = entity.get_inventory(defines.inventory.lab_input)
+        elseif inv_type == "rocket" or inv_type == "rocket_silo" or entity.type == "rocket-silo" then
+            -- Rocket silo has special inventory for rocket parts ingredients
+            inv = entity.get_inventory(defines.inventory.rocket_silo_input)
+            if not inv then inv = entity.get_inventory(defines.inventory.rocket_silo_rocket) end
         else
             -- Try multiple inventory types based on entity type
             inv = entity.get_inventory(defines.inventory.chest)
@@ -965,16 +1139,16 @@ local function execute_action(agent_id, action)
             if not inv then inv = entity.get_inventory(defines.inventory.furnace_source) end
             if not inv then inv = entity.get_inventory(defines.inventory.lab_input) end
             if not inv then inv = entity.get_inventory(defines.inventory.lab_modules) end
+            if not inv then inv = entity.get_inventory(defines.inventory.rocket_silo_input) end
         end
 
         if not inv then
             return false, "Entity has no suitable inventory for " .. entity.name .. " (type: " .. entity.type .. ")"
         end
 
-        -- Debug: check can_insert first
+        -- Check can_insert first
         local can = inv.can_insert{name = item_name, count = count}
         if not can then
-            -- Check each slot individually for labs
             local slot_info = ""
             if entity.type == "lab" then
                 for i = 1, #inv do
@@ -987,9 +1161,64 @@ local function execute_action(agent_id, action)
 
         local inserted = inv.insert{name = item_name, count = count}
         if inserted > 0 then
+            -- Player mode: consume from player inventory
+            if player_mode then
+                player_consume_items(player, item_name, inserted)
+            end
             return true, nil
         else
             return false, "Insert returned 0 for " .. item_name .. " into " .. entity.name .. " inv_size=" .. tostring(#inv) .. " can_insert=true"
+        end
+
+    elseif action_type == "Craft" then
+        -- Hand-craft items using player's crafting queue (Player mode only)
+        local recipe_name = action.recipe or action.Recipe
+        local count = action.count or action.Count or 1
+
+        if not recipe_name then
+            return false, "Craft requires recipe"
+        end
+
+        if not player_mode then
+            return false, "Craft is only available in Player mode (use SetRecipe for assemblers)"
+        end
+
+        local force = game.forces.player
+
+        -- Check recipe exists and is researched
+        local recipe = force.recipes[recipe_name]
+        if not recipe then
+            return false, "Unknown recipe: " .. recipe_name
+        end
+        if not recipe.enabled then
+            return false, "Recipe not researched: " .. recipe_name
+        end
+
+        -- Check player can hand-craft this recipe
+        if recipe.category and recipe.category ~= "crafting" then
+            return false, "Recipe cannot be hand-crafted (category: " .. tostring(recipe.category) .. ")"
+        end
+
+        -- Check crafting queue space (max 5 items typically)
+        if player.crafting_queue_size >= 5 then
+            return false, "Crafting queue full"
+        end
+
+        -- Check ingredients in player inventory
+        for _, ingredient in pairs(recipe.ingredients) do
+            local needed = ingredient.amount * count
+            if not player_has_items(player, ingredient.name, needed) then
+                local have = player.get_main_inventory().get_item_count(ingredient.name)
+                return false, "Missing ingredient: " .. ingredient.name .. " (need " .. needed .. ", have " .. have .. ")"
+            end
+        end
+
+        -- Begin crafting (consumes ingredients, queues recipe)
+        local crafted = player.begin_crafting{recipe = recipe_name, count = count}
+        if crafted > 0 then
+            return true, "Queued " .. crafted .. "x " .. recipe_name
+        else
+            return false, "Failed to start crafting"
         end
 
     elseif action_type == "DeconstructArea" then
@@ -1567,7 +1796,9 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "RepairEntity" then
-        -- Instantly repair an entity to full health
+        -- Repair an entity
+        -- Player mode: consumes repair packs from inventory
+        -- God mode: instantly repairs to full or specified amount
         local entity_id = action.entity_id or action.EntityId
         local amount = action.amount or action.Amount  -- nil = full repair
 
@@ -1594,13 +1825,40 @@ local function execute_action(agent_id, action)
             return false, "Entity has no health"
         end
 
-        if amount then
-            entity.health = math.min(entity.max_health, entity.health + amount)
-        else
-            entity.health = entity.max_health
-        end
+        if player_mode then
+            -- Player mode: check reach and consume repair packs
+            if not player.character.can_reach_entity(entity) then
+                return false, "Entity out of reach"
+            end
 
-        return true, nil
+            local damage = entity.max_health - entity.health
+            if damage <= 0 then
+                return false, "Entity already at full health"
+            end
+
+            -- Each repair pack heals ~60 HP (varies by prototype)
+            local repair_amount = 60
+            if not player_has_items(player, "repair-pack", 1) then
+                return false, "No repair packs in inventory"
+            end
+
+            -- Repair and consume pack
+            entity.health = math.min(entity.max_health, entity.health + repair_amount)
+            player_consume_items(player, "repair-pack", 1)
+
+            if entity.health < entity.max_health then
+                return true, "Partially repaired (need more repair packs)"
+            end
+            return true, nil
+        else
+            -- God mode: instant repair
+            if amount then
+                entity.health = math.min(entity.max_health, entity.health + amount)
+            else
+                entity.health = entity.max_health
+            end
+            return true, nil
+        end
 
     elseif action_type == "DamageEntity" then
         -- Damage a player entity (for testing)
@@ -2472,7 +2730,9 @@ local function execute_action(agent_id, action)
 
     elseif action_type == "LaunchRocket" then
         -- Launch rocket from a rocket silo
+        -- Use force_ready=true to instantly prepare and launch a rocket (cheat mode)
         local entity_id = action.entity_id or action.EntityId
+        local force_ready = action.force_ready or action.ForceReady
 
         local surface = game.surfaces[1]
         local force = game.forces.player
@@ -2494,13 +2754,24 @@ local function execute_action(agent_id, action)
             return false, "Rocket silo not found"
         end
 
+        -- Cheat mode: force rocket to be ready
+        if force_ready then
+            -- Set rocket parts to full (100 parts needed for a rocket)
+            local ok, err = pcall(function()
+                silo.rocket_parts = 100
+            end)
+            if not ok then
+                return false, "Failed to set rocket parts: " .. tostring(err)
+            end
+        end
+
         if not silo.rocket_silo_status then
             return false, "Silo has no rocket ready"
         end
 
         -- Check if rocket is ready
         if silo.rocket_silo_status ~= defines.rocket_silo_status.rocket_ready then
-            return false, "Rocket not ready (status: " .. tostring(silo.rocket_silo_status) .. ")"
+            return false, "Rocket not ready (status: " .. tostring(silo.rocket_silo_status) .. ", parts: " .. tostring(silo.rocket_parts) .. "/100)"
         end
 
         local ok = pcall(function()
@@ -2508,7 +2779,7 @@ local function execute_action(agent_id, action)
         end)
 
         if ok then
-            return true, nil
+            return true, "Rocket launched!"
         else
             return false, "Failed to launch rocket"
         end
@@ -2517,6 +2788,7 @@ local function execute_action(agent_id, action)
 
     elseif action_type == "PlaceLandfill" then
         -- Place landfill on water
+        -- Player mode: consumes landfill item from inventory
         local position = action.position or action.Position
         local tile_name = action.tile or action.Tile or "landfill"
 
@@ -2526,18 +2798,41 @@ local function execute_action(agent_id, action)
 
         local surface = game.surfaces[1]
 
-        local ok, err = pcall(function()
-            surface.set_tiles({{name = tile_name, position = {position[1], position[2]}}})
-        end)
+        if player_mode then
+            -- Check reach and consume item
+            if not player_can_reach_position(player, position) then
+                return false, "Position out of reach"
+            end
+            if not player_has_items(player, tile_name, 1) then
+                return false, "No " .. tile_name .. " in inventory"
+            end
 
-        if ok then
-            return true, nil
+            local ok, err = pcall(function()
+                surface.set_tiles({{name = tile_name, position = {position[1], position[2]}}})
+            end)
+
+            if ok then
+                player_consume_items(player, tile_name, 1)
+                return true, nil
+            else
+                return false, "Failed to place landfill: " .. tostring(err)
+            end
         else
-            return false, "Failed to place landfill: " .. tostring(err)
+            -- God mode
+            local ok, err = pcall(function()
+                surface.set_tiles({{name = tile_name, position = {position[1], position[2]}}})
+            end)
+
+            if ok then
+                return true, nil
+            else
+                return false, "Failed to place landfill: " .. tostring(err)
+            end
         end
 
     elseif action_type == "PlaceTiles" then
         -- Place multiple tiles in an area
+        -- Player mode: consumes tile items from inventory
         local position = action.position or action.Position
         local radius = action.radius or action.Radius or 1
         local tile_name = action.tile or action.Tile or "concrete"
@@ -2548,21 +2843,46 @@ local function execute_action(agent_id, action)
 
         local surface = game.surfaces[1]
         local tiles = {}
+        local tile_count = 0
 
         for dx = -radius, radius do
             for dy = -radius, radius do
                 table.insert(tiles, {name = tile_name, position = {position[1] + dx, position[2] + dy}})
+                tile_count = tile_count + 1
             end
         end
 
-        local ok, err = pcall(function()
-            surface.set_tiles(tiles)
-        end)
+        if player_mode then
+            -- Check reach (to center) and consume items
+            if not player_can_reach_position(player, position) then
+                return false, "Position out of reach"
+            end
+            if not player_has_items(player, tile_name, tile_count) then
+                local have = player.get_main_inventory().get_item_count(tile_name)
+                return false, "Not enough " .. tile_name .. " (need " .. tile_count .. ", have " .. have .. ")"
+            end
 
-        if ok then
-            return true, nil
+            local ok, err = pcall(function()
+                surface.set_tiles(tiles)
+            end)
+
+            if ok then
+                player_consume_items(player, tile_name, tile_count)
+                return true, nil
+            else
+                return false, "Failed to place tiles: " .. tostring(err)
+            end
         else
-            return false, "Failed to place tiles: " .. tostring(err)
+            -- God mode
+            local ok, err = pcall(function()
+                surface.set_tiles(tiles)
+            end)
+
+            if ok then
+                return true, nil
+            else
+                return false, "Failed to place tiles: " .. tostring(err)
+            end
         end
 
     else
@@ -2586,11 +2906,25 @@ remote.add_interface("gamerl", {
     register_agent = function(agent_id, agent_type, config)
         init_storage()
 
+        -- Bind player for Player-type agents
+        local bound_player = nil
+        if agent_type == "Player" then
+            local player_index = config and config.player_index or 1
+            bound_player = game.players[player_index]
+
+            if not bound_player then
+                game.print("[GameRL] Warning: No player at index " .. player_index)
+            elseif not bound_player.character then
+                game.print("[GameRL] Warning: Player has no character (spawn one first)")
+            end
+        end
+
         storage.gamerl.agents[agent_id] = {
             agent_type = agent_type,
             config = config or {},
             bounds = config and config.bounds or nil,
             registered_tick = game.tick,
+            bound_player = bound_player,  -- Player reference for Player-type agents
         }
 
         game.print("[GameRL] Agent '" .. agent_id .. "' registered as " .. tostring(agent_type))

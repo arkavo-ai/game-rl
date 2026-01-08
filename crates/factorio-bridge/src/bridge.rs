@@ -69,7 +69,12 @@ fn factorio_action_schema(agent_type: &AgentType) -> serde_json::Value {
         "EnterVehicle": {"params": ["vehicle_id"], "description": "Player enters vehicle"},
         "ExitVehicle": {"params": [], "description": "Player exits current vehicle"},
         "Attack": {"params": ["position?", "damage?", "damage_type?"], "description": "Attack enemy (physical/fire/explosion)"},
-        "AttackArea": {"params": ["position", "radius?", "damage?"], "description": "AoE damage (default radius 10)"}
+        "AttackArea": {"params": ["position", "radius?", "damage?"], "description": "AoE damage (default radius 10)"},
+        "Craft": {
+            "params": ["recipe", "count?"],
+            "description": "Hand-craft items (Player mode only). Consumes ingredients from inventory, queues recipe.",
+            "example": {"Type": "Craft", "recipe": "iron-gear-wheel", "count": 5}
+        }
     });
 
     let director_actions = serde_json::json!({
