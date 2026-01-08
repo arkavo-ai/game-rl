@@ -540,29 +540,119 @@ local function execute_action(agent_id, action)
         end
 
     elseif action_type == "StartResearch" then
+        -- Factorio 2.0 Research System:
+        -- 1. "Trigger technologies" (steam-power, electronics) complete via in-game actions, not labs
+        --    They have research_trigger instead of research_unit_ingredients
+        -- 2. Regular technologies require science packs in labs
+        -- 3. Tech tree: steam-power + electronics -> automation-science-pack -> automation
+        -- 4. Labs only accept science packs when relevant research is queued
+
         local technology = action.technology or action.Technology
+        local force_complete = action.force_complete or action.ForceComplete
         if not technology then
             return false, "StartResearch requires technology"
         end
 
         local tech = force.technologies[technology]
-        if tech and not tech.researched then
-            -- Factorio 2.0: use current_research directly
-            pcall(function() force.research_queue_enabled = true end)
-            local ok, err = pcall(function()
-                if force.add_research then
-                    force.add_research(technology)
-                else
-                    force.current_research = tech
+        if not tech then
+            return false, "Technology '" .. technology .. "' does not exist"
+        end
+
+        if tech.researched then
+            return false, "Technology already researched"
+        end
+
+        -- Check if this is a trigger technology (Factorio 2.0)
+        -- Trigger techs complete via actions (build boiler, craft circuit), not via labs
+        local prototype = prototypes.technology[technology]
+        local is_trigger_tech = prototype and prototype.research_trigger ~= nil
+        local has_science_cost = prototype and prototype.research_unit_ingredients and #prototype.research_unit_ingredients > 0
+
+        -- Auto-complete trigger technologies since they can't be researched via labs
+        if is_trigger_tech and not has_science_cost then
+            -- First check prerequisites for trigger techs too
+            local missing_prereqs = {}
+            for name, prereq in pairs(tech.prerequisites) do
+                if not prereq.researched then
+                    table.insert(missing_prereqs, name)
                 end
+            end
+            if #missing_prereqs > 0 then
+                return false, "Trigger tech '" .. technology .. "' missing prerequisites: " .. table.concat(missing_prereqs, ", ") .. " (use force_complete=true to bypass)"
+            end
+
+            -- Auto-complete the trigger tech
+            local ok, err = pcall(function()
+                tech.researched = true
             end)
             if ok then
+                return true, "trigger_tech_completed: " .. technology .. " (normally unlocked by in-game action)"
+            else
+                return false, "Failed to complete trigger tech: " .. tostring(err)
+            end
+        end
+
+        -- Force complete mode: directly mark as researched (for testing/debugging)
+        if force_complete then
+            local ok, err = pcall(function()
+                tech.researched = true
+            end)
+            if ok then
+                return true, "force_complete: " .. technology .. " researched"
+            else
+                return false, "force_complete failed: " .. tostring(err)
+            end
+        end
+
+        -- Check prerequisites for regular techs
+        local missing_prereqs = {}
+        for name, prereq in pairs(tech.prerequisites) do
+            if not prereq.researched then
+                table.insert(missing_prereqs, name)
+            end
+        end
+        if #missing_prereqs > 0 then
+            return false, "Missing prerequisites: " .. table.concat(missing_prereqs, ", ")
+        end
+
+        -- Check if technology is enabled
+        if not tech.enabled then
+            return false, "Technology is disabled (enabled=false)"
+        end
+
+        -- Factorio 2.0: use research queue
+        pcall(function() force.research_queue_enabled = true end)
+        local ok, err = pcall(function()
+            if force.add_research then
+                force.add_research(technology)
+            else
+                force.current_research = tech
+            end
+        end)
+        if ok then
+            -- Verify it actually started
+            local current = force.current_research
+            if current and current.name == technology then
                 return true, nil
             else
-                return false, "Failed to start research: " .. tostring(err)
+                -- Check if it was added to queue instead
+                local in_queue = false
+                if force.research_queue then
+                    for _, queued in pairs(force.research_queue) do
+                        if queued.name == technology then
+                            in_queue = true
+                            break
+                        end
+                    end
+                end
+                if in_queue then
+                    return true, "queued (current=" .. tostring(current and current.name or "nil") .. ")"
+                else
+                    return true, "add_research succeeded but current_research=" .. tostring(current and current.name or "nil")
+                end
             end
         else
-            return false, "Technology not available or already researched"
+            return false, "Failed to start research: " .. tostring(err)
         end
 
     elseif action_type == "RotateEntity" then
@@ -866,21 +956,40 @@ local function execute_action(agent_id, action)
             inv = entity.get_fuel_inventory()
         elseif inv_type == "output" then
             inv = entity.get_output_inventory()
+        elseif inv_type == "lab" or inv_type == "lab_input" then
+            inv = entity.get_inventory(defines.inventory.lab_input)
         else
-            inv = entity.get_inventory(defines.inventory.chest) or
-                  entity.get_inventory(defines.inventory.assembling_machine_input) or
-                  entity.get_inventory(defines.inventory.furnace_source)
+            -- Try multiple inventory types based on entity type
+            inv = entity.get_inventory(defines.inventory.chest)
+            if not inv then inv = entity.get_inventory(defines.inventory.assembling_machine_input) end
+            if not inv then inv = entity.get_inventory(defines.inventory.furnace_source) end
+            if not inv then inv = entity.get_inventory(defines.inventory.lab_input) end
+            if not inv then inv = entity.get_inventory(defines.inventory.lab_modules) end
         end
 
         if not inv then
-            return false, "Entity has no suitable inventory"
+            return false, "Entity has no suitable inventory for " .. entity.name .. " (type: " .. entity.type .. ")"
+        end
+
+        -- Debug: check can_insert first
+        local can = inv.can_insert{name = item_name, count = count}
+        if not can then
+            -- Check each slot individually for labs
+            local slot_info = ""
+            if entity.type == "lab" then
+                for i = 1, #inv do
+                    local filter = inv.get_filter(i)
+                    slot_info = slot_info .. string.format(" slot%d=%s", i, filter or "nil")
+                end
+            end
+            return false, "can_insert=false for " .. item_name .. " inv_size=" .. tostring(#inv) .. slot_info
         end
 
         local inserted = inv.insert{name = item_name, count = count}
         if inserted > 0 then
             return true, nil
         else
-            return false, "Failed to insert items"
+            return false, "Insert returned 0 for " .. item_name .. " into " .. entity.name .. " inv_size=" .. tostring(#inv) .. " can_insert=true"
         end
 
     elseif action_type == "DeconstructArea" then

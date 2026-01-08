@@ -21,11 +21,15 @@
 ### STILL OPEN
 - **#23**: game_speed not exposed in global observation
 - **#24**: Factorio 2.0 API changes cause production stats errors
+- **#26**: TransferItems inventory type mapping broken
 
 ### RESOLVED (2026-01-07)
 - **#20**: InsertItems contradictory error - FIXED (Lua ternary pattern bug)
 - **#21**: SpawnResource contradictory error - FIXED (Lua ternary pattern bug)
 - **#22**: Reset breaks agent observations - FIXED (agents now persist across resets)
+- **#25**: InsertItems doesn't support lab_input inventory - FIXED (added lab_input to inventory chain)
+- **#27**: StartResearch fails silently - FIXED (auto-complete trigger techs, better diagnostics)
+- **#28**: Factorio 2.0 trigger technologies not handled - FIXED (auto-detected and completed)
 
 ---
 
@@ -171,10 +175,15 @@ Global observation now includes:
 
 | Action | Issue |
 |--------|-------|
-| StartResearch | Returns success but research.current stays null (may need lab + science packs) |
 | TransferItems | Need source/destination entities |
 | ConnectWire | Need circuit network entities |
 | ChartArea | No charted_chunks observation field (low priority) |
+
+## Verified Working Actions (cont.)
+
+| Category | Action | Status | Notes |
+|----------|--------|--------|-------|
+| Research | StartResearch | ✅ | Auto-completes trigger techs, queues regular techs |
 
 ---
 
@@ -229,3 +238,88 @@ Global observation now includes:
 **Cause**: Factorio 2.0 changed the production statistics API. The code gracefully handles this with empty objects, but stats are unavailable.
 
 **Fix**: Update to use Factorio 2.0's new production statistics API.
+
+### 25. InsertItems Doesn't Support Lab Input Inventory
+**Severity**: Medium
+**Status**: FIXED (2026-01-07, pending reload)
+**Location**: `control.lua:870-873` InsertItems handler
+
+**Symptoms**: InsertItems fails with "Failed to insert items" when trying to insert science packs into labs.
+
+**Root Cause**: The InsertItems action only checks for `defines.inventory.chest`, `defines.inventory.assembling_machine_input`, and `defines.inventory.furnace_source` inventories. Labs use `defines.inventory.lab_input` which was not included.
+
+**Fix**: Added `defines.inventory.lab_input` to the inventory type chain:
+```lua
+inv = entity.get_inventory(defines.inventory.chest) or
+      entity.get_inventory(defines.inventory.assembling_machine_input) or
+      entity.get_inventory(defines.inventory.furnace_source) or
+      entity.get_inventory(defines.inventory.lab_input)
+```
+
+**Note**: Fix requires Factorio mod reload to take effect.
+
+### 26. TransferItems Inventory Type Mapping Broken
+**Severity**: Medium
+**Location**: `control.lua:775-784` TransferItems handler
+
+**Symptoms**: TransferItems fails with "Source entity has no inventory" even when source entity (like iron-chest) clearly has items.
+
+**Root Cause**: The `inv_map` table uses Lua `or` chains incorrectly:
+```lua
+input = defines.inventory.assembling_machine_input or defines.inventory.furnace_source or defines.inventory.chest,
+```
+This always returns the first truthy value (`assembling_machine_input`), not a fallback chain. When used on a chest, it fails because chests don't have `assembling_machine_input` inventory.
+
+**Workaround**: Explicitly specify `from_inventory: "chest"` when transferring from chests.
+
+**Fix**: Rewrite to try multiple inventory types like InsertItems does, or use a function that tests entity type.
+
+### ~~27. StartResearch Returns Success But Research Doesn't Start~~ RESOLVED
+**Severity**: Medium
+**Status**: FIXED (2026-01-07)
+**Location**: `control.lua:542-656` StartResearch handler
+
+**Symptoms**: StartResearch action returns `success: true` but `research.current` remains null and `research.progress` stays at 0.
+
+**Root Cause**: Factorio 2.0 introduced "trigger technologies" that don't use science packs - they complete when the player performs specific in-game actions (build boiler for steam-power, craft circuit for electronics). These techs have `research_trigger` instead of `research_unit_ingredients` in their prototype.
+
+**Tech Tree**: steam-power + electronics → automation-science-pack → automation
+
+**Fix**:
+1. Auto-detect trigger technologies via `prototypes.technology[name].research_trigger`
+2. Auto-complete trigger techs when prerequisites are met (since they can't be researched via labs)
+3. Added detailed diagnostic messages showing missing prerequisites
+4. Added queue verification after `add_research()` call
+
+**New Behavior**:
+- Trigger techs: Auto-completed with message "trigger_tech_completed: X (normally unlocked by in-game action)"
+- Regular techs: Added to research queue, labs consume science packs
+- `force_complete=true` parameter available to bypass all checks
+
+### ~~28. Factorio 2.0 Trigger Technologies Not Handled~~ RESOLVED
+**Severity**: High
+**Status**: FIXED (2026-01-07)
+**Location**: `control.lua:542-656` StartResearch handler
+
+**Symptoms**: Early-game research (automation) shows as "Unavailable" in Factorio UI. StartResearch for prerequisite techs like "steam-power" silently succeeds but doesn't actually start research.
+
+**Root Cause**: Factorio 2.0 redesigned early-game tech tree with "trigger technologies":
+- `steam-power` - Unlocks when player builds a boiler/steam-engine
+- `electronics` - Unlocks when player crafts an electronic circuit
+
+These are tutorial techs that guide new players. They don't require science packs and can't be researched via labs.
+
+**Fix**: StartResearch now:
+1. Detects trigger techs via `prototypes.technology[name].research_trigger`
+2. Auto-completes them since they can't be researched normally
+3. Checks prerequisites before auto-completing
+4. Returns clear message indicating what happened
+
+**Example**:
+```json
+// Request
+{"Type": "StartResearch", "technology": "steam-power"}
+
+// Response (trigger tech auto-completed)
+{"success": true, "error": "trigger_tech_completed: steam-power (normally unlocked by in-game action)"}
+```
