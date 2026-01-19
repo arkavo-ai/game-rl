@@ -39,3 +39,6 @@ dotnet/**/bin/
 # Local secrets
 .env
 *.env.local
+
+# Build artifacts
+dist/
