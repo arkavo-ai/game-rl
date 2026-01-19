@@ -156,7 +156,7 @@ dependencies = [
 
 [[package]]
 name = "factorio-bridge"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "game-bridge",
@@ -185,7 +185,7 @@ checksum = "05f29059c0c2090612e8d742178b0580d2dc940c837851ad723096f87af6663e"
 
 [[package]]
 name = "game-bridge"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -200,7 +200,7 @@ dependencies = [
 
 [[package]]
 name = "game-rl-cli"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "anyhow",
  "factorio-bridge",
@@ -214,7 +214,7 @@ dependencies = [
 
 [[package]]
 name = "game-rl-client"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "game-rl-core",
  "serde",
@@ -225,7 +225,7 @@ dependencies = [
 
 [[package]]
 name = "game-rl-core"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -234,7 +234,7 @@ dependencies = [
 
 [[package]]
 name = "game-rl-server"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "game-rl-core",
@@ -257,7 +257,7 @@ dependencies = [
 
 [[package]]
 name = "harmony-bridge"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "game-bridge",
@@ -914,7 +914,7 @@ checksum = "0f4a4e8e9dc5c62d159f04fcdbe07f4c3fb710415aab4754bf11505501e3251d"
 
 [[package]]
 name = "zomboid-bridge"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "async-trait",
  "game-bridge",

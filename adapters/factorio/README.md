@@ -9,22 +9,22 @@ Multi-agent RL training infrastructure for Factorio 2.0.
 **Option A: Symlink (for development)**
 ```bash
 # macOS
-ln -s "$(pwd)/adapters/factorio" ~/Library/Application\ Support/factorio/mods/gamerl_0.5.0
+ln -s "$(pwd)/adapters/factorio" ~/Library/Application\ Support/factorio/mods/gamerl_0.6.0
 
 # Linux
-ln -s "$(pwd)/adapters/factorio" ~/.factorio/mods/gamerl_0.5.0
+ln -s "$(pwd)/adapters/factorio" ~/.factorio/mods/gamerl_0.6.0
 ```
 
 **Option B: Copy**
 ```bash
 # macOS
-cp -r adapters/factorio ~/Library/Application\ Support/factorio/mods/gamerl_0.5.0
+cp -r adapters/factorio ~/Library/Application\ Support/factorio/mods/gamerl_0.6.0
 
 # Linux
-cp -r adapters/factorio ~/.factorio/mods/gamerl_0.5.0
+cp -r adapters/factorio ~/.factorio/mods/gamerl_0.6.0
 
 # Windows
-copy adapters\factorio %APPDATA%\Factorio\mods\gamerl_0.5.0
+copy adapters\factorio %APPDATA%\Factorio\mods\gamerl_0.6.0
 ```
 
 ### 2. Enable RCON

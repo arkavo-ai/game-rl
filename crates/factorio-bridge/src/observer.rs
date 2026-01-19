@@ -4,12 +4,14 @@
 //! to the `script-output/gamerl/` directory.
 
 use game_rl_core::{GameRLError, Observation, Result};
-use serde::{de::DeserializeOwned, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::DeserializeOwned};
 use std::collections::HashMap;
 
 /// Custom deserializer that handles Lua's empty table {} being serialized as object instead of array.
 /// This is needed because in Lua, an empty table {} serializes as JSON {} (object) not [] (array).
-fn deserialize_vec_or_empty_object<'de, D, T>(deserializer: D) -> std::result::Result<Vec<T>, D::Error>
+fn deserialize_vec_or_empty_object<'de, D, T>(
+    deserializer: D,
+) -> std::result::Result<Vec<T>, D::Error>
 where
     D: Deserializer<'de>,
     T: DeserializeOwned,
@@ -319,7 +321,9 @@ impl ObservationReader {
 
     /// Get the per-agent observation file path
     fn agent_observation_file(&self, agent_id: &str) -> PathBuf {
-        self.config.observation_dir.join(format!("observation_{}.json", agent_id))
+        self.config
+            .observation_dir
+            .join(format!("observation_{}.json", agent_id))
     }
 
     /// Read the current observation (non-blocking)
@@ -440,9 +444,10 @@ impl ObservationReader {
 
         loop {
             if start.elapsed() > self.config.timeout {
-                return Err(GameRLError::IpcError(
-                    format!("Timeout waiting for observation for agent {}", agent_id),
-                ));
+                return Err(GameRLError::IpcError(format!(
+                    "Timeout waiting for observation for agent {}",
+                    agent_id
+                )));
             }
 
             match fs::read_to_string(&path).await {
@@ -458,7 +463,7 @@ impl ObservationReader {
                         }
                     }
                 }
-                Ok(_) => {} // Empty file
+                Ok(_) => {}                                              // Empty file
                 Err(e) if e.kind() == std::io::ErrorKind::NotFound => {} // File not yet created
                 Err(e) => {
                     return Err(GameRLError::IpcError(format!(
@@ -840,13 +845,21 @@ mod tests {
             "state_hash": "216004234-abc"
         }"#;
 
-        let obs: FactorioObservation = serde_json::from_str(lua_json)
-            .expect("Should deserialize full Lua observation");
+        let obs: FactorioObservation =
+            serde_json::from_str(lua_json).expect("Should deserialize full Lua observation");
 
         assert_eq!(obs.tick, 216004234);
         assert_eq!(obs.global.evolution_factor, 0.014);
         assert_eq!(obs.global.research.as_ref().unwrap().researched_count, 2);
-        assert!(obs.global.research.as_ref().unwrap().completed.as_array().map_or(false, |a| a.len() == 2));
+        assert!(
+            obs.global
+                .research
+                .as_ref()
+                .unwrap()
+                .completed
+                .as_array()
+                .map_or(false, |a| a.len() == 2)
+        );
     }
 
     #[test]
@@ -885,8 +898,8 @@ mod tests {
             "state_hash": "1000-x"
         }"#;
 
-        let obs: FactorioObservation = serde_json::from_str(lua_json)
-            .expect("Should handle empty Lua tables as objects");
+        let obs: FactorioObservation =
+            serde_json::from_str(lua_json).expect("Should handle empty Lua tables as objects");
 
         assert_eq!(obs.tick, 1000);
     }
@@ -914,8 +927,8 @@ mod tests {
             "state_hash": "500-y"
         }"#;
 
-        let obs: FactorioObservation = serde_json::from_str(lua_json)
-            .expect("Should handle missing optional fields");
+        let obs: FactorioObservation =
+            serde_json::from_str(lua_json).expect("Should handle missing optional fields");
 
         assert!(obs.global.research.is_none());
         assert!(obs.global.production.is_none());
@@ -933,8 +946,8 @@ mod tests {
             "queue": ["logistics"],
             "researched_count": 1
         }"#;
-        let state: ResearchState = serde_json::from_str(with_research)
-            .expect("Should parse research with active tech");
+        let state: ResearchState =
+            serde_json::from_str(with_research).expect("Should parse research with active tech");
         assert_eq!(state.current, Some("automation-2".to_string()));
         assert_eq!(state.progress, 0.45);
         assert!(state.completed.as_array().map_or(false, |a| a.len() == 1));
@@ -969,11 +982,13 @@ mod tests {
             "progress": 0,
             "researched_count": 5
         }"#;
-        let state: ResearchState = serde_json::from_str(minimal)
-            .expect("Should parse minimal research state");
+        let state: ResearchState =
+            serde_json::from_str(minimal).expect("Should parse minimal research state");
         assert_eq!(state.researched_count, 5);
         // Default is Null
-        assert!(state.completed.is_null() || state.completed.is_array() || state.completed.is_object());
+        assert!(
+            state.completed.is_null() || state.completed.is_array() || state.completed.is_object()
+        );
     }
 
     #[test]
@@ -1001,8 +1016,8 @@ mod tests {
             "fluids_produced": {"petroleum-gas": 100},
             "api_errors": []
         }"#;
-        let stats: ProductionStats = serde_json::from_str(full)
-            .expect("Should parse full production stats");
+        let stats: ProductionStats =
+            serde_json::from_str(full).expect("Should parse full production stats");
         assert_eq!(stats.items_produced.get("iron-plate"), Some(&1000.0));
 
         // Empty (Lua empty tables as objects)
@@ -1012,8 +1027,8 @@ mod tests {
             "fluids_produced": {},
             "api_errors": {}
         }"#;
-        let stats: ProductionStats = serde_json::from_str(empty)
-            .expect("Should parse empty production stats");
+        let stats: ProductionStats =
+            serde_json::from_str(empty).expect("Should parse empty production stats");
         assert!(stats.items_produced.is_empty());
 
         // With API errors
@@ -1050,8 +1065,8 @@ mod tests {
             "reward_components": {"production": 1.0, "efficiency": 0.5}
         }"#;
 
-        let obs: AgentObservation = serde_json::from_str(agent_json)
-            .expect("Should parse agent observation");
+        let obs: AgentObservation =
+            serde_json::from_str(agent_json).expect("Should parse agent observation");
 
         assert_eq!(obs.entities.len(), 1);
         assert_eq!(obs.entities[0].name, "assembling-machine-1");
@@ -1073,8 +1088,7 @@ mod tests {
             "energy": 0.75,
             "inventory": {"iron-plate": 10}
         }"#;
-        let entity: EntityState = serde_json::from_str(full)
-            .expect("Should parse full entity");
+        let entity: EntityState = serde_json::from_str(full).expect("Should parse full entity");
         assert_eq!(entity.id, 42);
         assert_eq!(entity.recipe, Some("steel-plate".to_string()));
 
@@ -1085,8 +1099,8 @@ mod tests {
             "name": "transport-belt",
             "position": {"x": 5, "y": 10}
         }"#;
-        let entity: EntityState = serde_json::from_str(minimal)
-            .expect("Should parse minimal entity");
+        let entity: EntityState =
+            serde_json::from_str(minimal).expect("Should parse minimal entity");
         assert!(entity.recipe.is_none());
         assert!(entity.inventory.is_none());
     }

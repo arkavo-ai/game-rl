@@ -7,8 +7,7 @@ use crate::rcon::RconClient;
 use async_trait::async_trait;
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, Capabilities, GameManifest,
-    GameRLError, Observation, Result, StepResult, StreamDescriptor,
-    manifest::Scenario,
+    GameRLError, Observation, Result, StepResult, StreamDescriptor, manifest::Scenario,
 };
 use game_rl_server::GameEnvironment;
 use game_rl_server::environment::StateUpdate;
@@ -90,33 +89,59 @@ fn factorio_action_schema(agent_type: &AgentType) -> serde_json::Value {
     });
 
     let common_entities = serde_json::json!([
-        "transport-belt", "fast-transport-belt", "express-transport-belt",
-        "inserter", "fast-inserter", "stack-inserter",
-        "assembling-machine-1", "assembling-machine-2", "assembling-machine-3",
-        "electric-mining-drill", "stone-furnace", "steel-furnace", "electric-furnace",
-        "solar-panel", "accumulator", "small-electric-pole", "medium-electric-pole",
-        "pipe", "pipe-to-ground", "offshore-pump", "boiler", "steam-engine",
-        "lab", "radar", "roboport", "logistic-chest-passive-provider", "logistic-chest-requester"
+        "transport-belt",
+        "fast-transport-belt",
+        "express-transport-belt",
+        "inserter",
+        "fast-inserter",
+        "stack-inserter",
+        "assembling-machine-1",
+        "assembling-machine-2",
+        "assembling-machine-3",
+        "electric-mining-drill",
+        "stone-furnace",
+        "steel-furnace",
+        "electric-furnace",
+        "solar-panel",
+        "accumulator",
+        "small-electric-pole",
+        "medium-electric-pole",
+        "pipe",
+        "pipe-to-ground",
+        "offshore-pump",
+        "boiler",
+        "steam-engine",
+        "lab",
+        "radar",
+        "roboport",
+        "logistic-chest-passive-provider",
+        "logistic-chest-requester"
     ]);
 
     // Build action set based on agent type
     let (actions, description): (serde_json::Value, String) = match agent_type {
         AgentType::Observer => (
             serde_json::json!({}),
-            "Observer agent: read-only, no actions available".to_string()
+            "Observer agent: read-only, no actions available".to_string(),
         ),
         AgentType::Player => {
             let mut actions = base_actions.as_object().unwrap().clone();
             actions.extend(player_actions.as_object().unwrap().clone());
             actions.extend(build_actions.as_object().unwrap().clone());
-            (serde_json::Value::Object(actions), "Player agent: direct character control and building".to_string())
-        },
+            (
+                serde_json::Value::Object(actions),
+                "Player agent: direct character control and building".to_string(),
+            )
+        }
         AgentType::Entity => {
             let mut actions = base_actions.as_object().unwrap().clone();
             // Entity agents control a single unit - limited actions
             actions.insert("Attack".into(), player_actions["Attack"].clone());
-            (serde_json::Value::Object(actions), "Entity agent: single unit control".to_string())
-        },
+            (
+                serde_json::Value::Object(actions),
+                "Entity agent: single unit control".to_string(),
+            )
+        }
         AgentType::Controller => {
             let mut actions = base_actions.as_object().unwrap().clone();
             actions.extend(build_actions.as_object().unwrap().clone());
@@ -124,29 +149,41 @@ fn factorio_action_schema(agent_type: &AgentType) -> serde_json::Value {
             actions.extend(train_actions.as_object().unwrap().clone());
             actions.extend(blueprint_actions.as_object().unwrap().clone());
             actions.extend(circuit_actions.as_object().unwrap().clone());
-            (serde_json::Value::Object(actions), "Controller agent: factory building and logistics".to_string())
-        },
+            (
+                serde_json::Value::Object(actions),
+                "Controller agent: factory building and logistics".to_string(),
+            )
+        }
         AgentType::System => {
             let mut actions = base_actions.as_object().unwrap().clone();
             actions.insert("SetSpeed".into(), director_actions["SetSpeed"].clone());
             actions.insert("ChartArea".into(), director_actions["ChartArea"].clone());
-            (serde_json::Value::Object(actions), "System agent: game system control".to_string())
-        },
+            (
+                serde_json::Value::Object(actions),
+                "System agent: game system control".to_string(),
+            )
+        }
         AgentType::Director => {
             let mut actions = base_actions.as_object().unwrap().clone();
             actions.extend(build_actions.as_object().unwrap().clone());
             actions.extend(logistics_actions.as_object().unwrap().clone());
             actions.extend(player_actions.as_object().unwrap().clone());
             actions.extend(director_actions.as_object().unwrap().clone());
-            (serde_json::Value::Object(actions), "Director agent: full game control including spawning".to_string())
-        },
+            (
+                serde_json::Value::Object(actions),
+                "Director agent: full game control including spawning".to_string(),
+            )
+        }
         AgentType::Custom(name) => {
             // Custom agents get Controller-level access by default
             let mut actions = base_actions.as_object().unwrap().clone();
             actions.extend(build_actions.as_object().unwrap().clone());
             actions.extend(logistics_actions.as_object().unwrap().clone());
-            (serde_json::Value::Object(actions), format!("Custom agent '{}': factory building and logistics", name))
-        },
+            (
+                serde_json::Value::Object(actions),
+                format!("Custom agent '{}': factory building and logistics", name),
+            )
+        }
     };
 
     serde_json::json!({
@@ -313,11 +350,10 @@ impl GameEnvironment for FactorioBridge {
         let config_json = serde_json::to_string(&config)
             .map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
+        let agent_type_str = format!("{:?}", agent_type);
         let lua = format!(
             r#"remote.call("gamerl", "register_agent", "{}", "{}", '{}')"#,
-            agent_id,
-            format!("{:?}", agent_type),
-            config_json
+            agent_id, agent_type_str, config_json
         );
 
         let response = self.rcon.lua(&lua).await?;
@@ -535,7 +571,7 @@ impl GameEnvironment for FactorioBridge {
                     "Director".to_string(),
                 ],
                 deterministic: true,
-                headless: false,  // Can run with GUI
+                headless: false, // Can run with GUI
                 save_replay: true,
                 domain_randomization: true,
                 variable_timestep: true,
@@ -543,7 +579,9 @@ impl GameEnvironment for FactorioBridge {
             scenarios: vec![
                 Scenario {
                     name: "freeplay".to_string(),
-                    description: Some("Standard freeplay - build factory, launch rocket".to_string()),
+                    description: Some(
+                        "Standard freeplay - build factory, launch rocket".to_string(),
+                    ),
                     config: Default::default(),
                 },
                 Scenario {
