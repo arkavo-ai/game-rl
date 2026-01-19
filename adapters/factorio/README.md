@@ -6,7 +6,11 @@ Multi-agent RL training infrastructure for Factorio 2.0.
 
 ### 1. Install the Mod
 
-**Option A: Symlink (for development)**
+**Option A: Mod Portal (recommended)**
+
+Install directly from the [Factorio Mod Portal](https://mods.factorio.com/mod/gamerl) - search for "Arkavo Game-RL" in-game or download from the website.
+
+**Option B: Symlink (for development)**
 ```bash
 # macOS
 ln -s "$(pwd)/adapters/factorio" ~/Library/Application\ Support/factorio/mods/gamerl_0.6.0
@@ -15,7 +19,7 @@ ln -s "$(pwd)/adapters/factorio" ~/Library/Application\ Support/factorio/mods/ga
 ln -s "$(pwd)/adapters/factorio" ~/.factorio/mods/gamerl_0.6.0
 ```
 
-**Option B: Copy**
+**Option C: Copy**
 ```bash
 # macOS
 cp -r adapters/factorio ~/Library/Application\ Support/factorio/mods/gamerl_0.6.0
