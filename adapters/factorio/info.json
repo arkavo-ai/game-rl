@@ -1,11 +1,11 @@
 {
     "name": "gamerl",
-    "version": "0.6.0",
+    "version": "0.6.1",
     "title": "Arkavo Game-RL",
     "author": "Arkavo",
     "contact": "info@arkavo.com",
-    "homepage": "https://github.com/arkavo-ai/game-rl",
+    "homepage": "https://github.com/arkavo-ai/game-rl/releases",
     "factorio_version": "2.0",
-    "description": "Multi-agent reinforcement learning infrastructure for Factorio. Enables AI agents to observe game state, execute actions, and train policies. SETUP: In main menu, Ctrl+Alt+Settings (Cmd+Option on Mac) → The rest → set local-rcon-socket=127.0.0.1:27015 and local-rcon-password=gamerl → then host multiplayer.",
+    "description": "AI/RL framework for Factorio via Model Context Protocol (MCP). Control your factory with Claude Code using natural language. DOWNLOAD FULL PACKAGE from GitHub releases (includes game-rl-server binary + this mod): https://github.com/arkavo-ai/game-rl/releases [Stable: macOS | Experimental: Windows, Linux/SteamOS]",
     "dependencies": ["base >= 2.0"]
 }

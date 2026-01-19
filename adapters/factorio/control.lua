@@ -2,7 +2,7 @@
 -- Multi-agent RL training infrastructure for Factorio 2.0
 -- https://github.com/arkavo-ai/game-rl
 
-local VERSION = "0.6.0"
+local VERSION = "0.6.1"
 
 -- ============================================================================
 -- State Management
