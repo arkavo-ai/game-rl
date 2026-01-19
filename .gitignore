@@ -34,3 +34,4 @@ adapters/zomboid/mod/bin/*/game-rl-server.exe
 
 # Keep bin directory structure
 !adapters/**/bin/*/.gitkeep
+dotnet/**/bin/

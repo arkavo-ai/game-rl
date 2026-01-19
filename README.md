@@ -17,10 +17,11 @@ Turn any game into a multi-agent AI environment. Train RL policies, orchestrate 
 
 ## Supported Games
 
-| Game | Status | Platform | Steam Workshop |
-|------|--------|----------|----------------|
-| RimWorld | ✅ Working | macOS (tested), Windows/Linux (untested) | [Subscribe](https://steamcommunity.com/sharedfiles/filedetails/?id=3634065510) |
-| Project Zomboid | ✅ Working | macOS (tested), Windows/Linux (untested) | [Subscribe](https://steamcommunity.com/sharedfiles/filedetails/?id=3637032835) |
+| Game | Status | Platform | Distribution |
+|------|--------|----------|--------------|
+| RimWorld | ✅ Working | macOS (tested), Windows/Linux (untested) | [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3634065510) |
+| Project Zomboid | ✅ Working | macOS (tested), Windows/Linux (untested) | [Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=3637032835) |
+| Factorio | 🚧 In Development | All platforms | [Mod Portal](https://mods.factorio.com/) (coming soon) |
 
 ## Quick Start with Claude Code
 
@@ -116,11 +117,11 @@ The unified `game-rl-server` binary auto-detects which game is running:
 │  │  Handler    │ │  Registry   │ │  Streams    │               │
 │  └─────────────┘ └─────────────┘ └─────────────┘               │
 └───────────────────────────┬─────────────────────────────────────┘
-                            │ IPC (Unix socket / File-based)
+                            │ IPC (Unix socket / File-based / RCON)
                             ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │                    Game Runtime                                 │
-│  RimWorld (.NET/Harmony)  |  Project Zomboid (Lua)             │
+│  RimWorld (.NET/Harmony) | Project Zomboid (Lua) | Factorio    │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -134,14 +135,16 @@ game-rl/
 │   ├── game-rl-cli/             # Unified CLI (game-rl-server binary)
 │   ├── game-bridge/             # Shared IPC protocol
 │   ├── harmony-bridge/          # RimWorld bridge (Unix socket)
-│   └── zomboid-bridge/          # Project Zomboid bridge (file IPC)
+│   ├── zomboid-bridge/          # Project Zomboid bridge (file IPC)
+│   └── factorio-bridge/         # Factorio bridge (RCON + file)
 │
 ├── dotnet/                      # C# libraries
 │   └── GameRL.Harmony/          # Base library for .NET games
 │
 ├── adapters/                    # Game-specific implementations
 │   ├── rimworld/                # RimWorld mod (C#)
-│   └── zomboid/                 # Project Zomboid mod (Lua)
+│   ├── zomboid/                 # Project Zomboid mod (Lua)
+│   └── factorio/                # Factorio mod (Lua)
 │
 └── .github/workflows/           # CI for all platforms
 ```
