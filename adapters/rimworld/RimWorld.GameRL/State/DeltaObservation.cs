@@ -19,6 +19,7 @@ namespace RimWorld.GameRL.State
         public ActionFeedback? LastAction { get; set; }
         public List<string> Alerts { get; set; } = new();
         public List<GameEvent> Events { get; set; } = new();  // Causality: why things changed
+        public List<string> ValidActions { get; set; } = new();  // Actions valid at current state
         public ObservationDelta Delta { get; set; } = new();
     }
 

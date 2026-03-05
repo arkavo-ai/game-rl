@@ -379,5 +379,90 @@ namespace RimWorld.GameRL.Actions
             pawn.playerSettings.medCare = care;
             Log.Message($"[GameRL] SetMedicalCare: Set {pawn.LabelShort} to {care}");
         }
+
+        /// <summary>
+        /// Rescue a downed pawn to a medical bed
+        /// </summary>
+        [GameRLAction("Rescue", Description = "Have a colonist rescue a downed pawn to a medical bed")]
+        public static void Rescue(
+            [GameRLParam("ColonistId")] Pawn rescuer,
+            [GameRLParam("TargetId")] Pawn patient)
+        {
+            if (rescuer == null)
+            {
+                Log.Warning("[GameRL] Rescue: ColonistId not found");
+                return;
+            }
+
+            if (patient == null)
+            {
+                Log.Warning("[GameRL] Rescue: TargetId not found");
+                return;
+            }
+
+            if (rescuer.Downed)
+            {
+                Log.Warning($"[GameRL] Rescue: {rescuer.LabelShort} is downed and cannot rescue");
+                return;
+            }
+
+            if (!patient.Downed)
+            {
+                Log.Warning($"[GameRL] Rescue: {patient.LabelShort} is not downed");
+                return;
+            }
+
+            // Find a medical bed
+            var bed = RestUtility.FindBedFor(patient, rescuer, checkSocialProperness: false);
+            if (bed == null)
+            {
+                Log.Warning($"[GameRL] Rescue: No available bed for {patient.LabelShort}");
+                return;
+            }
+
+            var job = JobMaker.MakeJob(JobDefOf.Rescue, patient, bed);
+            rescuer.jobs?.StartJob(job, JobCondition.InterruptForced);
+            Log.Message($"[GameRL] Rescue: {rescuer.LabelShort} rescuing {patient.LabelShort}");
+        }
+
+        /// <summary>
+        /// Prioritize tending a patient
+        /// </summary>
+        [GameRLAction("TendTo", Description = "Have a doctor tend to an injured/sick pawn")]
+        public static void TendTo(
+            [GameRLParam("ColonistId")] Pawn doctor,
+            [GameRLParam("TargetId")] Pawn patient)
+        {
+            if (doctor == null)
+            {
+                Log.Warning("[GameRL] TendTo: ColonistId (doctor) not found");
+                return;
+            }
+
+            if (patient == null)
+            {
+                Log.Warning("[GameRL] TendTo: TargetId (patient) not found");
+                return;
+            }
+
+            if (doctor.Downed)
+            {
+                Log.Warning($"[GameRL] TendTo: {doctor.LabelShort} is downed");
+                return;
+            }
+
+            // Check patient has tending needs
+            var hasTendable = patient.health?.hediffSet?.hediffs
+                ?.Any(h => h.TendableNow()) ?? false;
+            if (!hasTendable)
+            {
+                Log.Warning($"[GameRL] TendTo: {patient.LabelShort} has no tendable conditions");
+                return;
+            }
+
+            var job = JobMaker.MakeJob(JobDefOf.TendPatient, patient);
+            doctor.jobs?.StartJob(job, JobCondition.InterruptForced);
+            Log.Message($"[GameRL] TendTo: {doctor.LabelShort} tending {patient.LabelShort}");
+        }
     }
 }

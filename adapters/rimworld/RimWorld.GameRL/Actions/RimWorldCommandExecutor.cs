@@ -25,6 +25,7 @@ namespace RimWorld.GameRL.Actions
         private readonly HarmonyRPC _rpc;
         private int _episodeStartTick;
         private const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
+        private Dictionary<string, double>? _cachedReward;
 
         /// <summary>
         /// Last action result for RL feedback
@@ -111,6 +112,32 @@ namespace RimWorld.GameRL.Actions
                     : DeltaConfig.Normal;
             }
 
+            // Parse RewardShaping from config
+            if (config.TryGetValue("RewardShaping", out var shapingObj) && shapingObj is Dictionary<string, object> shapingDict)
+            {
+                // Components filter: only include these reward components
+                if (shapingDict.TryGetValue("Components", out var compObj))
+                {
+                    if (compObj is System.Collections.IEnumerable compList)
+                    {
+                        info.RewardComponents = new HashSet<string>();
+                        foreach (var c in compList)
+                            info.RewardComponents.Add(c?.ToString() ?? "");
+                    }
+                }
+
+                // Weights: multiply specific reward components
+                if (shapingDict.TryGetValue("Weights", out var weightsObj) && weightsObj is Dictionary<string, object> weightsDict)
+                {
+                    info.RewardWeights = new Dictionary<string, double>();
+                    foreach (var kvp in weightsDict)
+                    {
+                        try { info.RewardWeights[kvp.Key] = Convert.ToDouble(kvp.Value); }
+                        catch { }
+                    }
+                }
+            }
+
             _agents[agentId] = info;
 
             Log.Message($"[GameRL] Agent registered: {agentId} ({agentType}, mode={info.ObservationMode})");
@@ -125,6 +152,8 @@ namespace RimWorld.GameRL.Actions
 
         public void ExecuteAction(string agentId, object action)
         {
+            _cachedReward = null;
+
             if (action == null)
             {
                 LastActionResult = ActionResult.NoOp();
@@ -208,13 +237,39 @@ namespace RimWorld.GameRL.Actions
 
         public Dictionary<string, double> ComputeReward(string agentId)
         {
-            return _rewardCalculator.Compute();
+            if (_cachedReward == null)
+            {
+                _rewardCalculator.SetLastActionResult(LastActionResult);
+                _cachedReward = _rewardCalculator.Compute();
+            }
+
+            // Apply per-agent reward shaping if configured
+            if (_agents.TryGetValue(agentId, out var agentInfo)
+                && (agentInfo.RewardWeights != null || agentInfo.RewardComponents != null))
+            {
+                var shaped = new Dictionary<string, double>();
+                foreach (var kvp in _cachedReward)
+                {
+                    // Filter: only include specified components
+                    if (agentInfo.RewardComponents != null && !agentInfo.RewardComponents.Contains(kvp.Key))
+                        continue;
+
+                    // Weight: multiply by agent-specific weight
+                    double value = kvp.Value;
+                    if (agentInfo.RewardWeights != null && agentInfo.RewardWeights.TryGetValue(kvp.Key, out var weight))
+                        value *= weight;
+
+                    shaped[kvp.Key] = value;
+                }
+                return shaped;
+            }
+
+            return _cachedReward;
         }
 
         public double GetTotalReward(string agentId)
         {
-            var components = _rewardCalculator.Compute();
-            return components.Values.Sum();
+            return ComputeReward(agentId).Values.Sum();
         }
 
         private class AgentInfo
@@ -225,6 +280,8 @@ namespace RimWorld.GameRL.Actions
             public bool FirstObservation { get; set; } = true;
             public string? LastStateHash { get; set; }
             public DeltaConfig DeltaConfig { get; set; } = DeltaConfig.Minimal;
+            public Dictionary<string, double>? RewardWeights { get; set; }
+            public HashSet<string>? RewardComponents { get; set; }
         }
 
         /// <summary>

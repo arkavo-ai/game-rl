@@ -2,6 +2,7 @@
 
 using System;
 using System.Linq;
+using System.Reflection;
 using GameRL.Harmony.RPC;
 using Verse;
 using RimWorld;
@@ -697,6 +698,227 @@ namespace RimWorld.GameRL.Actions
             else
             {
                 Log.Warning("[GameRL] RequestFullState: Command executor not initialized");
+            }
+        }
+
+        /// <summary>
+        /// Select a research project to work on
+        /// </summary>
+        [GameRLAction("SelectResearch", Description = "Select a research project. Use defNames from Research.Available in observation.")]
+        public static void SelectResearch([GameRLParam("ProjectDefName")] string projectDefName)
+        {
+            if (string.IsNullOrEmpty(projectDefName))
+            {
+                Log.Warning("[GameRL] SelectResearch: ProjectDefName is required");
+                return;
+            }
+
+            var proj = DefDatabase<ResearchProjectDef>.GetNamed(projectDefName, errorOnFail: false);
+            if (proj == null)
+            {
+                Log.Warning($"[GameRL] SelectResearch: Unknown project '{projectDefName}'");
+                return;
+            }
+
+            if (proj.IsFinished)
+            {
+                Log.Warning($"[GameRL] SelectResearch: '{projectDefName}' is already completed");
+                return;
+            }
+
+            if (proj.prerequisites != null)
+            {
+                foreach (var prereq in proj.prerequisites)
+                {
+                    if (!prereq.IsFinished)
+                    {
+                        Log.Warning($"[GameRL] SelectResearch: Missing prerequisite: {prereq.label}");
+                        return;
+                    }
+                }
+            }
+
+            var manager = Find.ResearchManager;
+            if (manager == null)
+            {
+                Log.Warning("[GameRL] SelectResearch: No ResearchManager available");
+                return;
+            }
+
+            var field = typeof(ResearchManager).GetField("currentProj",
+                BindingFlags.NonPublic | BindingFlags.Instance);
+            if (field != null)
+            {
+                field.SetValue(manager, proj);
+                Log.Message($"[GameRL] SelectResearch: Now researching {proj.label}");
+            }
+            else
+            {
+                var prop = typeof(ResearchManager).GetProperty("CurrentProject");
+                if (prop?.SetMethod != null)
+                {
+                    prop.SetValue(manager, proj);
+                    Log.Message($"[GameRL] SelectResearch: Now researching {proj.label}");
+                }
+                else
+                {
+                    Log.Warning("[GameRL] SelectResearch: Cannot set research project - API incompatible");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Delete a zone by label
+        /// </summary>
+        [GameRLAction("DeleteZone", Description = "Delete a zone by its label (from Zones observation)")]
+        public static void DeleteZone([GameRLParam("ZoneLabel")] string zoneLabel)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] DeleteZone: No map loaded");
+                return;
+            }
+
+            var zone = map.zoneManager.AllZones.FirstOrDefault(z => z.label == zoneLabel);
+            if (zone == null)
+            {
+                Log.Warning($"[GameRL] DeleteZone: Zone '{zoneLabel}' not found");
+                return;
+            }
+
+            zone.Delete();
+            Log.Message($"[GameRL] DeleteZone: Deleted zone '{zoneLabel}'");
+        }
+
+        /// <summary>
+        /// Set stockpile priority
+        /// </summary>
+        [GameRLAction("SetStockpilePriority", Description = "Set stockpile priority (1=low, 2=normal, 3=preferred, 4=important, 5=critical)")]
+        public static void SetStockpilePriority(
+            [GameRLParam("ZoneLabel")] string zoneLabel,
+            [GameRLParam("Priority")] int priority)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] SetStockpilePriority: No map loaded");
+                return;
+            }
+
+            var zone = map.zoneManager.AllZones.FirstOrDefault(z => z.label == zoneLabel) as Zone_Stockpile;
+            if (zone == null)
+            {
+                Log.Warning($"[GameRL] SetStockpilePriority: Stockpile '{zoneLabel}' not found");
+                return;
+            }
+
+            var storagePriority = priority switch
+            {
+                1 => StoragePriority.Low,
+                2 => StoragePriority.Normal,
+                3 => StoragePriority.Preferred,
+                4 => StoragePriority.Important,
+                5 => StoragePriority.Critical,
+                _ => StoragePriority.Normal
+            };
+
+            zone.settings.Priority = storagePriority;
+            Log.Message($"[GameRL] SetStockpilePriority: Set '{zoneLabel}' to {storagePriority}");
+        }
+
+        /// <summary>
+        /// Set the plant type for a growing zone
+        /// </summary>
+        [GameRLAction("SetGrowingPlant", Description = "Change what plant a growing zone grows (e.g., Plant_Rice, Plant_Potato)")]
+        public static void SetGrowingPlant(
+            [GameRLParam("ZoneLabel")] string zoneLabel,
+            [GameRLParam("PlantDefName")] string plantDefName)
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+            {
+                Log.Warning("[GameRL] SetGrowingPlant: No map loaded");
+                return;
+            }
+
+            var zone = map.zoneManager.AllZones.FirstOrDefault(z => z.label == zoneLabel) as Zone_Growing;
+            if (zone == null)
+            {
+                Log.Warning($"[GameRL] SetGrowingPlant: Growing zone '{zoneLabel}' not found");
+                return;
+            }
+
+            var plantDef = DefDatabase<ThingDef>.GetNamed(plantDefName, errorOnFail: false);
+            if (plantDef == null)
+            {
+                Log.Warning($"[GameRL] SetGrowingPlant: Unknown plant '{plantDefName}'");
+                return;
+            }
+
+            zone.SetPlantDefToGrow(plantDef);
+            Log.Message($"[GameRL] SetGrowingPlant: '{zoneLabel}' now growing {plantDefName}");
+        }
+
+        /// <summary>
+        /// Set prisoner interaction mode
+        /// </summary>
+        [GameRLAction("SetPrisonerInteraction", Description = "Set how to interact with a prisoner (AttemptRecruit, ReduceResistance, Release, Execution)")]
+        public static void SetPrisonerInteraction(
+            [GameRLParam("PrisonerId"), Resolve] Pawn prisoner,
+            [GameRLParam("Mode")] string mode)
+        {
+            if (prisoner == null)
+            {
+                Log.Warning("[GameRL] SetPrisonerInteraction: Prisoner not found");
+                return;
+            }
+
+            if (!prisoner.IsPrisoner)
+            {
+                Log.Warning($"[GameRL] SetPrisonerInteraction: {prisoner.LabelShort} is not a prisoner");
+                return;
+            }
+
+            // Find the interaction mode def by name
+            var modeDef = DefDatabase<PrisonerInteractionModeDef>.GetNamed(mode, errorOnFail: false);
+            if (modeDef == null)
+            {
+                // Try common aliases
+                modeDef = mode.ToLowerInvariant() switch
+                {
+                    "recruit" or "attemptrecruit" => PrisonerInteractionModeDefOf.AttemptRecruit,
+                    "reduce" or "reduceresistance" => PrisonerInteractionModeDefOf.ReduceResistance,
+                    "release" => PrisonerInteractionModeDefOf.Release,
+                    "execution" or "execute" => PrisonerInteractionModeDefOf.Execution,
+                    _ => null
+                };
+            }
+
+            if (modeDef == null)
+            {
+                Log.Warning($"[GameRL] SetPrisonerInteraction: Unknown mode '{mode}'. Use: AttemptRecruit, ReduceResistance, Release, Execution");
+                return;
+            }
+
+            // Set via reflection for API compatibility
+            try
+            {
+                var prop = typeof(Pawn_GuestTracker).GetProperty("interactionMode")
+                    ?? typeof(Pawn_GuestTracker).GetProperty("ExclusiveInteractionMode");
+                if (prop?.SetMethod != null)
+                {
+                    prop.SetValue(prisoner.guest, modeDef);
+                    Log.Message($"[GameRL] SetPrisonerInteraction: {prisoner.LabelShort} set to {modeDef.defName}");
+                }
+                else
+                {
+                    Log.Warning("[GameRL] SetPrisonerInteraction: Cannot set interaction mode - API incompatible");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[GameRL] SetPrisonerInteraction: {ex.Message}");
             }
         }
     }

@@ -314,6 +314,15 @@ namespace RimWorld.GameRL
         // ═══════════════════════════════════════════════════════════════════════════
 
         /// <summary>
+        /// Called by UpdatePatch every frame (even when paused).
+        /// Ensures IPC messages are dequeued regardless of pause state.
+        /// </summary>
+        internal static void OnUpdate()
+        {
+            _bridge?.ProcessCommands();
+        }
+
+        /// <summary>
         /// Called by TickPatch after each game tick
         /// </summary>
         internal static void OnTick()

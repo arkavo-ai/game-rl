@@ -5,6 +5,7 @@ using System.Linq;
 using System.Reflection;
 using Verse;
 using RimWorld;
+using RimWorld.GameRL.Actions;
 
 namespace RimWorld.GameRL.Rewards
 {
@@ -14,6 +15,9 @@ namespace RimWorld.GameRL.Rewards
     /// </summary>
     public class SurvivalReward
     {
+        // Action result for invalid action penalty
+        private ActionResult? _lastActionResult;
+
         // Previous state for delta computation
         private int _lastColonistCount;
         private float _lastWealth;
@@ -27,6 +31,14 @@ namespace RimWorld.GameRL.Rewards
         public SurvivalReward()
         {
             Reset();
+        }
+
+        /// <summary>
+        /// Set last action result before computing reward
+        /// </summary>
+        public void SetLastActionResult(ActionResult? result)
+        {
+            _lastActionResult = result;
         }
 
         public void Reset()
@@ -197,6 +209,28 @@ namespace RimWorld.GameRL.Rewards
             {
                 components["construction"] = buildingDelta * 0.1;
             }
+
+            // ═══════════════════════════════════════════════════════════════
+            // INVALID ACTION: Penalty for failed actions
+            // ═══════════════════════════════════════════════════════════════
+            if (_lastActionResult != null && !_lastActionResult.Success)
+            {
+                double penalty = _lastActionResult.ErrorCode switch
+                {
+                    ActionErrorCode.UnknownAction => -0.5,
+                    ActionErrorCode.TargetNotFound => -0.2,
+                    ActionErrorCode.InvalidTarget => -0.15,
+                    ActionErrorCode.PreconditionFailed => -0.1,
+                    ActionErrorCode.NoMap => -0.5,
+                    ActionErrorCode.InvalidPosition => -0.1,
+                    ActionErrorCode.InsufficientResources => -0.05,
+                    ActionErrorCode.NoEffect => -0.02,
+                    ActionErrorCode.InternalError => -0.1,
+                    _ => -0.1
+                };
+                components["invalid_action"] = penalty;
+            }
+            _lastActionResult = null;
 
             // ═══════════════════════════════════════════════════════════════
             // Update state for next computation

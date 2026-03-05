@@ -69,6 +69,35 @@ namespace RimWorld.GameRL.State
         public Dictionary<string, int> Skills { get; set; } = new();
 
         public Dictionary<string, int> WorkPriorities { get; set; } = new();
+
+        public List<string> Traits { get; set; } = new();
+
+        public List<HediffInfo> Injuries { get; set; } = new();
+
+        public List<SocialRelation> Relations { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Social relation between two colonists
+    /// </summary>
+    public class SocialRelation
+    {
+        public string OtherPawnId { get; set; } = "";
+        public string RelationType { get; set; } = "";
+        public int Opinion { get; set; }
+    }
+
+    /// <summary>
+    /// Health condition (injury, disease, implant, etc.)
+    /// </summary>
+    public class HediffInfo
+    {
+        public string DefName { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string? BodyPart { get; set; }
+        public float Severity { get; set; }
+        public bool LifeThreatening { get; set; }
+        public bool Bleeding { get; set; }
     }
 
     /// <summary>
@@ -130,7 +159,10 @@ namespace RimWorld.GameRL.State
                 HasRangedWeapon = pawn.equipment?.Primary?.def?.IsRangedWeapon ?? false,
                 Needs = ExtractNeeds(pawn),
                 Skills = ExtractSkills(pawn),
-                WorkPriorities = ExtractWorkPriorities(pawn)
+                WorkPriorities = ExtractWorkPriorities(pawn),
+                Traits = ExtractTraits(pawn),
+                Injuries = ExtractInjuries(pawn),
+                Relations = ExtractRelations(pawn)
             };
         }
 
@@ -203,6 +235,87 @@ namespace RimWorld.GameRL.State
                 skills[skill.def.defName] = skill.Level;
             }
             return skills;
+        }
+
+        private static List<string> ExtractTraits(Pawn pawn)
+        {
+            var traits = new List<string>();
+            if (pawn.story?.traits == null) return traits;
+
+            try
+            {
+                foreach (var trait in pawn.story.traits.allTraits)
+                {
+                    if (trait?.def != null)
+                    {
+                        traits.Add(trait.CurrentData?.label ?? trait.def.defName);
+                    }
+                }
+            }
+            catch
+            {
+                // Return partial results
+            }
+            return traits;
+        }
+
+        private static List<HediffInfo> ExtractInjuries(Pawn pawn)
+        {
+            var injuries = new List<HediffInfo>();
+            if (pawn.health?.hediffSet == null) return injuries;
+
+            try
+            {
+                foreach (var hediff in pawn.health.hediffSet.hediffs)
+                {
+                    if (hediff == null || !hediff.Visible) continue;
+
+                    injuries.Add(new HediffInfo
+                    {
+                        DefName = hediff.def.defName,
+                        Label = hediff.LabelCap,
+                        BodyPart = hediff.Part?.Label,
+                        Severity = hediff.Severity,
+                        LifeThreatening = hediff.CurStage?.lifeThreatening ?? false,
+                        Bleeding = hediff.Bleeding
+                    });
+                }
+            }
+            catch
+            {
+                // Return partial results
+            }
+            return injuries;
+        }
+
+        private static List<SocialRelation> ExtractRelations(Pawn pawn)
+        {
+            var relations = new List<SocialRelation>();
+            if (pawn.relations == null) return relations;
+
+            try
+            {
+                // Get direct relationships (spouse, child, lover, rival, etc.)
+                foreach (var rel in pawn.relations.DirectRelations)
+                {
+                    if (rel?.otherPawn == null || rel.otherPawn.Destroyed) continue;
+
+                    var opinion = 0;
+                    try { opinion = pawn.relations.OpinionOf(rel.otherPawn); } catch { }
+
+                    relations.Add(new SocialRelation
+                    {
+                        OtherPawnId = rel.otherPawn.ThingID,
+                        RelationType = rel.def?.defName ?? "Unknown",
+                        Opinion = opinion
+                    });
+                }
+            }
+            catch
+            {
+                // Return partial results
+            }
+            return relations;
         }
 
         private static Dictionary<string, int> ExtractWorkPriorities(Pawn pawn)
