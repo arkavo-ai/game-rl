@@ -24,13 +24,27 @@ namespace RimWorld.GameRL.Actions
             if (map == null)
                 return null;
 
-            // Search free colonists first (most common case)
+            // Search free colonists first by ThingID (most common case)
             var pawn = map.mapPawns.FreeColonists.FirstOrDefault(p => p.ThingID == id);
             if (pawn != null)
                 return pawn;
 
-            // Fall back to all pawns on map
-            return map.mapPawns.AllPawns.FirstOrDefault(p => p.ThingID == id);
+            // Fall back: match by full name or short name (LLMs often use names instead of ThingIDs)
+            pawn = map.mapPawns.FreeColonists.FirstOrDefault(p =>
+                p.Name?.ToStringFull?.Equals(id, StringComparison.OrdinalIgnoreCase) == true
+                || p.Name?.ToStringShort?.Equals(id, StringComparison.OrdinalIgnoreCase) == true);
+            if (pawn != null)
+                return pawn;
+
+            // Fall back to all pawns on map by ThingID
+            pawn = map.mapPawns.AllPawns.FirstOrDefault(p => p.ThingID == id);
+            if (pawn != null)
+                return pawn;
+
+            // Fall back to all pawns by name
+            return map.mapPawns.AllPawns.FirstOrDefault(p =>
+                p.Name?.ToStringFull?.Equals(id, StringComparison.OrdinalIgnoreCase) == true
+                || p.Name?.ToStringShort?.Equals(id, StringComparison.OrdinalIgnoreCase) == true);
         }
     }
 
@@ -71,7 +85,13 @@ namespace RimWorld.GameRL.Actions
             if (map == null)
                 return null;
 
-            return map.listerBuildings.allBuildingsColonist
+            // Search colonist buildings first, then all buildings on map
+            var building = map.listerBuildings.allBuildingsColonist
+                .FirstOrDefault(b => b.ThingID == id);
+            if (building != null)
+                return building;
+
+            return map.listerBuildings.allBuildingsNonColonist
                 .FirstOrDefault(b => b.ThingID == id);
         }
     }

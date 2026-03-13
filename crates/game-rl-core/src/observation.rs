@@ -87,7 +87,7 @@ pub enum TerminationReason {
 #[serde(rename_all = "PascalCase")]
 pub struct GameEvent {
     /// Event type identifier
-    #[serde(rename = "Type")]
+    #[serde(rename = "Type", alias = "EventType")]
     pub event_type: String,
 
     /// Tick when event occurred
@@ -100,6 +100,28 @@ pub struct GameEvent {
     /// Event-specific details
     #[serde(default)]
     pub details: serde_json::Value,
+}
+
+/// Cumulative episode metrics for training loops
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub struct EpisodeSummary {
+    /// Total accumulated reward across all steps
+    pub total_reward: f64,
+
+    /// Number of steps taken this episode
+    pub step_count: u64,
+
+    /// Game ticks elapsed since episode start
+    pub ticks_elapsed: u64,
+
+    /// Per-component reward breakdown (cumulative)
+    #[serde(default)]
+    pub reward_breakdown: HashMap<String, f64>,
+
+    /// Why the episode ended (if it has)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub termination_reason: Option<TerminationReason>,
 }
 
 /// Performance metrics for a step

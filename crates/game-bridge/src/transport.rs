@@ -7,6 +7,7 @@ use crate::protocol::{GameMessage, deserialize};
 use async_trait::async_trait;
 use game_rl_core::{GameRLError, Result};
 use game_rl_server::environment::StateUpdate;
+use std::collections::VecDeque;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use tracing::{debug, error, warn};
 
@@ -43,7 +44,7 @@ pub async fn reader_task<R: AsyncReader>(
     event_tx: broadcast::Sender<StateUpdate>,
 ) {
     // Queue of pending response channels (FIFO - responses come in order)
-    let mut pending: Vec<oneshot::Sender<Result<GameMessage>>> = Vec::new();
+    let mut pending: VecDeque<oneshot::Sender<Result<GameMessage>>> = VecDeque::new();
 
     loop {
         tokio::select! {
@@ -51,7 +52,7 @@ pub async fn reader_task<R: AsyncReader>(
             req = request_rx.recv() => {
                 match req {
                     Some((_msg, response_tx)) => {
-                        pending.push(response_tx);
+                        pending.push_back(response_tx);
                     }
                     None => {
                         // Channel closed, exit
@@ -85,7 +86,7 @@ pub async fn reader_task<R: AsyncReader>(
 
                                     // Response to a pending request
                                     _ => {
-                                        if let Some(response_tx) = pending.pop() {
+                                        if let Some(response_tx) = pending.pop_front() {
                                             let _ = response_tx.send(Ok(msg));
                                         } else {
                                             warn!("Received response but no pending request: {:?}", msg);
@@ -94,9 +95,10 @@ pub async fn reader_task<R: AsyncReader>(
                                 }
                             }
                             Err(e) => {
-                                error!("Failed to deserialize message: {}", e);
+                                let raw_json: String = String::from_utf8_lossy(&data).chars().take(500).collect();
+                                error!("Failed to deserialize message: {} | raw: {}", e, raw_json);
                                 // Send error to pending request if any
-                                if let Some(response_tx) = pending.pop() {
+                                if let Some(response_tx) = pending.pop_front() {
                                     let _ = response_tx.send(Err(GameRLError::SerializationError(e.to_string())));
                                 }
                             }

@@ -3,6 +3,7 @@
 using System;
 using System.IO;
 using System.Collections.Generic;
+using System.Linq;
 using HarmonyLib;
 using Verse;
 using RimWorld;
@@ -80,6 +81,8 @@ namespace RimWorld.GameRL
                 _bridge.OnConfigureStreams += HandleConfigureStreams;
                 _bridge.OnReset += HandleReset;
                 _bridge.OnGetStateHash += HandleGetStateHash;
+                _bridge.OnObserve += HandleObserve;
+                _bridge.OnGetEpisodeSummary += HandleGetEpisodeSummary;
                 _bridge.OnShutdown += HandleShutdown;
                 _bridge.OnClientConnected += HandleClientConnected;
 
@@ -181,14 +184,40 @@ namespace RimWorld.GameRL
 
             _currentStepId++;
             _currentAgentId = msg.AgentId;
-            _ticksRemaining = msg.Ticks > 0 ? msg.Ticks : 1;
-            _stepInProgress = true;
 
             try
             {
                 _commandExecutor?.ExecuteAction(msg.AgentId, msg.Action!);
 
-                // Force ticks to advance immediately
+                // If a LoadCheckpoint was called, the game is about to tear down and reload.
+                if (GameActions.LoadRequested)
+                {
+                    GameActions.LoadRequested = false;
+                    Log.Message("[GameRL] Load requested — skipping ForceTicks, completing step");
+                    return;
+                }
+
+                // Ticks=0: action-only mode — execute action + observe, no ticking
+                if (msg.Ticks == 0)
+                {
+                    _stateExtractor!.LastActionResult = _commandExecutor!.LastActionResult;
+                    var observation = ExtractObservationForAgent(msg.AgentId);
+                    var (done, truncated, _) = _commandExecutor!.CheckTermination();
+                    var stateHash = _stateExtractor!.ComputeStateHash();
+                    _bridge?.SendStepResult(
+                        msg.AgentId,
+                        observation,
+                        0.0,
+                        new Dictionary<string, double>(),
+                        done,
+                        truncated,
+                        stateHash);
+                    return;
+                }
+
+                // Normal mode: tick and observe
+                _ticksRemaining = msg.Ticks;
+                _stepInProgress = true;
                 ForceTicks(_ticksRemaining);
             }
             catch (Exception ex)
@@ -235,32 +264,43 @@ namespace RimWorld.GameRL
             {
                 _commandExecutor?.Reset(msg.Seed, msg.Scenario);
 
+                // If a checkpoint load was triggered, the game is tearing down.
+                // Don't try to extract observations — the connection will be lost.
+                if (GameActions.LoadRequested)
+                {
+                    GameActions.LoadRequested = false;
+                    Log.Message("[GameRL] Reset triggered load — connection will be lost during reload");
+                    return;
+                }
+
                 // Track episode start for observations
                 _stateExtractor!.EpisodeStartTick = Find.TickManager?.TicksGame ?? 0;
+                _stateExtractor.ClearAlertState();
 
-                // Reset always returns full observation (first observation after reset)
-                object observation;
-                if (_agents.Count == 0)
+                // Auto-unforbid all items so colonists can access resources
+                var currentMap = Find.CurrentMap;
+                if (currentMap != null)
                 {
-                    observation = ExtractObservationForAgent("default");
+                    MapActions.UnforbidAllItems(currentMap);
                 }
-                else if (_agents.Count == 1)
+
+                // Return compact observation after reset to avoid exceeding MCP token budget.
+                // The full state was 204K+ chars. Return only resources, colonists, and metadata.
+                // Agents can drill down via observe with Include parameter.
+                var resetObs = new Dictionary<string, object>
                 {
-                    var enumerator = _agents.Keys.GetEnumerator();
-                    enumerator.MoveNext();
-                    observation = ExtractObservationForAgent(enumerator.Current);
-                }
-                else
-                {
-                    var observations = new Dictionary<string, object>();
-                    foreach (var agentId in _agents.Keys)
-                    {
-                        observations[agentId] = ExtractObservationForAgent(agentId);
-                    }
-                    observation = observations;
-                }
+                    ["Tick"] = (ulong)(Find.TickManager?.TicksGame ?? 0),
+                    ["ColonistCount"] = currentMap?.mapPawns.FreeColonistsCount ?? 0,
+                    ["Resources"] = ResourceExtractor.Extract(currentMap),
+                    ["Weather"] = currentMap?.weatherManager.curWeather?.defName ?? "Unknown",
+                    ["Season"] = currentMap != null ? GenLocalDate.Season(currentMap).ToString() : "Unknown",
+                    ["Hour"] = currentMap != null ? GenLocalDate.HourOfDay(currentMap) : 0,
+                    ["Temperature"] = currentMap != null ? currentMap.mapTemperature.OutdoorTemp : 0f,
+                    ["MapSize"] = currentMap != null ? $"{currentMap.Size.x}x{currentMap.Size.z}" : "0x0",
+                    ["Message"] = "Reset complete. Use observe tool with Include parameter for full state details."
+                };
                 var stateHash = _stateExtractor!.ComputeStateHash();
-                _bridge?.SendResetComplete(observation, stateHash);
+                _bridge?.SendResetComplete(resetObs, stateHash);
             }
             catch (Exception ex)
             {
@@ -273,6 +313,66 @@ namespace RimWorld.GameRL
         {
             var hash = _stateExtractor?.ComputeStateHash() ?? "sha256:0000000000000000000000000000000000000000000000000000000000000000";
             _bridge?.SendStateHash(hash);
+        }
+
+        /// <summary>
+        /// Handle Observe — read-only state snapshot, no ticking, no action execution.
+        /// Used by the server's background cache refresh.
+        /// </summary>
+        private static void HandleObserve(ObserveMessage msg)
+        {
+            try
+            {
+                // Pick an agent for observation context (or use default)
+                string agentId;
+                if (_agents.Count > 0)
+                {
+                    var enumerator = _agents.Keys.GetEnumerator();
+                    enumerator.MoveNext();
+                    agentId = enumerator.Current;
+                }
+                else
+                {
+                    agentId = "default";
+                }
+
+                var observation = ExtractObservationForAgent(agentId);
+                var (done, truncated, _) = _commandExecutor!.CheckTermination();
+                var stateHash = _stateExtractor!.ComputeStateHash();
+
+                _bridge?.SendStepResult(
+                    agentId,
+                    observation,
+                    0.0,
+                    new Dictionary<string, double>(),
+                    done,
+                    truncated,
+                    stateHash);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[GameRL] Observe error: {ex}");
+                _bridge?.SendError(-32603, ex.Message);
+            }
+        }
+
+        private static void HandleGetEpisodeSummary(GetEpisodeSummaryMessage msg)
+        {
+            try
+            {
+                var summary = _commandExecutor!.GetEpisodeSummary();
+                _bridge?.SendEpisodeSummary(
+                    summary.TotalReward,
+                    summary.StepCount,
+                    summary.TicksElapsed,
+                    summary.RewardBreakdown,
+                    summary.TerminationReason);
+            }
+            catch (Exception ex)
+            {
+                Log.Error($"[GameRL] EpisodeSummary error: {ex}");
+                _bridge?.SendError(-32603, ex.Message);
+            }
         }
 
         private static void HandleConfigureStreams(ConfigureStreamsMessage msg)
@@ -344,11 +444,14 @@ namespace RimWorld.GameRL
             // Push events periodically (only when not in a step, to avoid interference)
             if (!_stepInProgress && _stateExtractor != null && _bridge != null)
             {
+                _stateExtractor.TickAlertCheck();
                 _ticksSinceLastEventPush++;
-                if (_ticksSinceLastEventPush >= EventPushIntervalTicks)
+                // Push immediately for urgent events (high/critical alerts), or at regular interval
+                if (_stateExtractor.HasUrgentEvents || _ticksSinceLastEventPush >= EventPushIntervalTicks)
                 {
                     PushPendingEvents();
                     _ticksSinceLastEventPush = 0;
+                    _stateExtractor.HasUrgentEvents = false;
                 }
             }
         }
@@ -366,11 +469,19 @@ namespace RimWorld.GameRL
             var tick = (ulong)(Find.TickManager?.TicksGame ?? 0);
 
             // Build minimal state snapshot for events
+            var alerts = _stateExtractor.GetCurrentAlerts();
             var state = new Dictionary<string, object>
             {
                 ["tick"] = tick,
-                ["colony_alive"] = Find.CurrentMap?.mapPawns?.FreeColonistsCount > 0
+                ["colony_alive"] = Find.CurrentMap?.mapPawns?.FreeColonistsCount > 0,
+                ["alerts"] = alerts
             };
+
+            // Include threats when there are high/critical alerts
+            if (alerts.Any(a => a.Severity >= 2))
+            {
+                state["threats"] = _stateExtractor.ExtractThreats(Find.CurrentMap);
+            }
 
             _bridge.SendStateUpdate(tick, state, events);
             Log.Message($"[GameRL] Pushed {events.Count} events at tick {tick}");

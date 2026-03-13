@@ -187,6 +187,10 @@ namespace RimWorld.GameRL.State
 
                 try
                 {
+                    // Skip resource items that RimWorld classifies as weapons (e.g. WoodLog, Steel)
+                    if (weapon.def.IsStuff || weapon.def.CountAsResource)
+                        continue;
+
                     // Only include weapons not held by pawns (on ground or in storage)
                     if (weapon.ParentHolder is Map || weapon.ParentHolder is Zone_Stockpile)
                     {
@@ -219,20 +223,20 @@ namespace RimWorld.GameRL.State
                 allThingsSnapshot = new List<Thing>();
             }
 
-            var foodCounts = new Dictionary<string, int>();
+            var itemCounts = new Dictionary<string, int>();
             var forbiddenCounts = new Dictionary<string, int>();
             foreach (var thing in allThingsSnapshot)
             {
-                if (thing == null || thing.Destroyed) continue;
+                if (thing == null || thing.Destroyed || !thing.Spawned) continue;
 
                 try
                 {
-                    if (thing.def.IsNutritionGivingIngestible && thing.Spawned)
+                    // Track all resource items (food, materials, drugs, etc.)
+                    if (thing.def.category == ThingCategory.Item)
                     {
-                        // Aggregate food by def name
                         var key = thing.def.defName;
-                        if (!foodCounts.ContainsKey(key)) foodCounts[key] = 0;
-                        foodCounts[key] += thing.stackCount;
+                        if (!itemCounts.ContainsKey(key)) itemCounts[key] = 0;
+                        itemCounts[key] += thing.stackCount;
 
                         // Track forbidden items separately so agents know what to unforbid
                         if (thing.IsForbidden(Faction.OfPlayer))
@@ -241,9 +245,10 @@ namespace RimWorld.GameRL.State
                             forbiddenCounts[key] += thing.stackCount;
                         }
                     }
-                    else if (thing.def.IsMedicine && thing.Spawned)
+
+                    // List medicine individually (usually few, needs individual IDs for TendTo)
+                    if (thing.def.IsMedicine)
                     {
-                        // List medicine individually (usually few)
                         index.Items.Add(new EntityRef
                         {
                             Id = thing.ThingID,
@@ -260,7 +265,7 @@ namespace RimWorld.GameRL.State
                     // Skip things that throw during extraction
                 }
             }
-            index.ItemCounts = foodCounts;
+            index.ItemCounts = itemCounts;
             index.ForbiddenItemCounts = forbiddenCounts;
 
             // Process player-owned buildings - focus on useful buildings, not ancient ruins

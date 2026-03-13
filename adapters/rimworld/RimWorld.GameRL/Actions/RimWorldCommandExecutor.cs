@@ -27,6 +27,12 @@ namespace RimWorld.GameRL.Actions
         private const int MaxEpisodeTicks = 60000 * 15;  // 15 in-game days
         private Dictionary<string, double>? _cachedReward;
 
+        // Cumulative episode tracking
+        private double _cumulativeTotalReward;
+        private ulong _episodeStepCount;
+        private Dictionary<string, double> _cumulativeRewardBreakdown = new();
+        private string? _lastTerminationReason;
+
         /// <summary>
         /// Last action result for RL feedback
         /// </summary>
@@ -37,12 +43,13 @@ namespace RimWorld.GameRL.Actions
         /// </summary>
         public bool ForceFullState { get; set; }
 
+
         public RimWorldCommandExecutor()
         {
             // Initialize HarmonyRPC with RimWorld logging
             _rpc = new HarmonyRPC(
                 log: msg => Log.Message(msg),
-                logError: msg => Log.Error(msg)
+                logError: msg => Log.Message(msg)
             );
 
             // Register type resolvers for automatic ID -> object conversion
@@ -166,7 +173,7 @@ namespace RimWorld.GameRL.Actions
             {
                 LastActionResult = ActionResult.Fail("Unknown", ActionErrorCode.InternalError,
                     $"Unknown action format: {action.GetType()}");
-                Log.Warning($"[GameRL] Unknown action format: {action.GetType()}");
+                Log.Message($"[GameRL] Unknown action format: {action.GetType()}");
                 return;
             }
 
@@ -186,16 +193,41 @@ namespace RimWorld.GameRL.Actions
             var result = _rpc.Dispatch(actionType!, actionParams);
             if (result.Success)
             {
-                LastActionResult = ActionResult.Ok(actionType!, "Action executed successfully");
+                var message = result.ReturnValue is string returnStr && !string.IsNullOrEmpty(returnStr)
+                    ? returnStr
+                    : "Action executed successfully";
+                LastActionResult = ActionResult.Ok(actionType!, message);
             }
             else
             {
-                // Determine error code based on message
-                var errorCode = result.ErrorMessage?.Contains("Unknown action") == true
-                    ? ActionErrorCode.UnknownAction
-                    : ActionErrorCode.InternalError;
-                LastActionResult = ActionResult.Fail(actionType!, errorCode, result.ErrorMessage ?? "Action failed");
-                Log.Warning($"[GameRL] {result.ErrorMessage}");
+                // Determine error code based on error message content
+                var msg = result.ErrorMessage ?? "Action failed";
+                ActionErrorCode errorCode;
+                if (msg.Contains("Unknown action"))
+                    errorCode = ActionErrorCode.UnknownAction;
+                else if (msg.Contains("not found") || msg.Contains("Failed to resolve"))
+                {
+                    errorCode = ActionErrorCode.TargetNotFound;
+                    // Append valid colonist IDs so the LLM agent can self-correct
+                    try
+                    {
+                        var map = Find.CurrentMap;
+                        if (map != null)
+                        {
+                            var validIds = string.Join(", ",
+                                map.mapPawns.FreeColonists
+                                    .Where(p => p != null && !p.Destroyed && p.Spawned)
+                                    .Select(p => $"'{p.Name?.ToStringShort ?? p.ThingID}'"));
+                            if (!string.IsNullOrEmpty(validIds))
+                                msg += $" Use a colonist name: [{validIds}]";
+                        }
+                    }
+                    catch { }
+                }
+                else
+                    errorCode = ActionErrorCode.InternalError;
+                LastActionResult = ActionResult.Fail(actionType!, errorCode, msg);
+                Log.Message($"[GameRL] {msg}");
             }
         }
 
@@ -208,13 +240,52 @@ namespace RimWorld.GameRL.Actions
 
             _episodeStartTick = Find.TickManager?.TicksGame ?? 0;
             _rewardCalculator.Reset();
+            _cachedReward = null;
+            _cumulativeTotalReward = 0;
+            _episodeStepCount = 0;
+            _cumulativeRewardBreakdown.Clear();
+            _lastTerminationReason = null;
             ResetAgentStates();  // Reset first observation flag for all agents
 
-            Log.Message($"[GameRL] Reset (seed: {seed}, scenario: {scenario})");
+            if (!string.IsNullOrEmpty(scenario))
+            {
+                // "new" or "new:Scenario:Biome" — generate a fresh colony
+                if (scenario.StartsWith("new", StringComparison.OrdinalIgnoreCase))
+                {
+                    var parts = scenario.Split(':');
+                    var scenarioName = parts.Length > 1 ? parts[1] : "Crashlanded";
+                    var biomeName = parts.Length > 2 ? parts[2] : "TemperateForest";
+                    var storyteller = parts.Length > 3 ? parts[3] : "Cassandra";
+                    var difficulty = parts.Length > 4 ? parts[4] : "Strive";
+                    var mapSize = 250;
+                    if (parts.Length > 5 && int.TryParse(parts[5], out var ms))
+                        mapSize = ms;
 
-            // Note: Full reset (generating new map) is complex and may require
-            // loading a save or triggering new game flow. For now, we just
-            // reset the episode tracking.
+                    var worldSeed = seed.HasValue ? seed.Value.ToString() : Rand.Int.ToString();
+                    Log.Message($"[GameRL] Reset: Generating new colony (scenario={scenarioName}, biome={biomeName}, seed={worldSeed})");
+                    GameActions.NewColony(worldSeed, scenarioName, storyteller, difficulty, biomeName, mapSize);
+                    return;
+                }
+
+                // Otherwise try to load a saved checkpoint
+                var saveFiles = GenFilePaths.AllSavedGameFiles.ToList();
+                var match = saveFiles.FirstOrDefault(f =>
+                    System.IO.Path.GetFileNameWithoutExtension(f.Name) == scenario);
+
+                if (match != null)
+                {
+                    Log.Message($"[GameRL] Reset: Loading checkpoint '{scenario}'");
+                    GameActions.LoadRequested = true;
+                    GameDataSaveLoader.LoadGame(match);
+                    return;
+                }
+                else
+                {
+                    Log.Warning($"[GameRL] Reset: Save '{scenario}' not found, doing soft reset");
+                }
+            }
+
+            Log.Message($"[GameRL] Reset (seed: {seed}, scenario: {scenario})");
         }
 
         public (bool done, bool truncated, string? reason) CheckTermination()
@@ -269,7 +340,51 @@ namespace RimWorld.GameRL.Actions
 
         public double GetTotalReward(string agentId)
         {
-            return ComputeReward(agentId).Values.Sum();
+            var components = ComputeReward(agentId);
+            var stepReward = components.Values.Sum();
+
+            // Accumulate into episode totals
+            _cumulativeTotalReward += stepReward;
+            _episodeStepCount++;
+            foreach (var kvp in components)
+            {
+                if (_cumulativeRewardBreakdown.ContainsKey(kvp.Key))
+                    _cumulativeRewardBreakdown[kvp.Key] += kvp.Value;
+                else
+                    _cumulativeRewardBreakdown[kvp.Key] = kvp.Value;
+            }
+
+            // Track termination
+            var (done, truncated, reason) = CheckTermination();
+            if (done || truncated)
+                _lastTerminationReason = reason;
+
+            return stepReward;
+        }
+
+        /// <summary>
+        /// Get cumulative episode metrics for training assessment
+        /// </summary>
+        public EpisodeSummaryData GetEpisodeSummary()
+        {
+            var ticksElapsed = (ulong)((Find.TickManager?.TicksGame ?? 0) - _episodeStartTick);
+            return new EpisodeSummaryData
+            {
+                TotalReward = _cumulativeTotalReward,
+                StepCount = _episodeStepCount,
+                TicksElapsed = ticksElapsed,
+                RewardBreakdown = new Dictionary<string, double>(_cumulativeRewardBreakdown),
+                TerminationReason = _lastTerminationReason
+            };
+        }
+
+        public class EpisodeSummaryData
+        {
+            public double TotalReward { get; set; }
+            public ulong StepCount { get; set; }
+            public ulong TicksElapsed { get; set; }
+            public Dictionary<string, double> RewardBreakdown { get; set; } = new();
+            public string? TerminationReason { get; set; }
         }
 
         private class AgentInfo

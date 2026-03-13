@@ -2,8 +2,8 @@
 
 use async_trait::async_trait;
 use game_rl_core::{
-    Action, AgentConfig, AgentId, AgentManifest, AgentType, GameEvent, GameManifest, Observation,
-    Result, StepResult, StreamDescriptor,
+    Action, AgentConfig, AgentId, AgentManifest, AgentType, EpisodeSummary, GameEvent,
+    GameManifest, Observation, Result, StepResult, StreamDescriptor,
 };
 use tokio::sync::broadcast;
 
@@ -40,6 +40,14 @@ pub trait GameEnvironment: Send + Sync + 'static {
     /// Reset the environment
     async fn reset(&mut self, seed: Option<u64>, scenario: Option<String>) -> Result<Observation>;
 
+    /// Observe current state without ticking or executing actions.
+    /// Used for periodic cache refresh — lightweight read-only snapshot.
+    async fn observe(&mut self) -> Result<StepResult> {
+        Err(game_rl_core::GameRLError::GameError(
+            "Observe not supported by this environment".into(),
+        ))
+    }
+
     /// Get current state hash for determinism verification
     async fn state_hash(&mut self) -> Result<String>;
 
@@ -55,6 +63,13 @@ pub trait GameEnvironment: Send + Sync + 'static {
 
     /// Load and replay trajectory
     async fn load_trajectory(&mut self, path: &str) -> Result<()>;
+
+    /// Get cumulative episode metrics for training assessment
+    async fn episode_summary(&mut self) -> Result<EpisodeSummary> {
+        Err(game_rl_core::GameRLError::GameError(
+            "Episode summary not supported by this environment".into(),
+        ))
+    }
 
     /// Called when environment should shut down
     async fn shutdown(&mut self) -> Result<()>;

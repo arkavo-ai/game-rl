@@ -53,7 +53,7 @@ namespace RimWorld.GameRL.State
 
         public EntityIndex Entities { get; set; } = new();
 
-        public List<string> Alerts { get; set; } = new();
+        public List<AlertState> Alerts { get; set; } = new();
 
         public float Temperature { get; set; }
 
@@ -98,6 +98,31 @@ namespace RimWorld.GameRL.State
         /// Active traders on the map or in orbit
         /// </summary>
         public List<TraderInfo> ActiveTraders { get; set; } = new();
+
+        /// <summary>
+        /// Map metadata (size, biome) - static per map
+        /// </summary>
+        public MapInfo? Map { get; set; }
+
+        /// <summary>
+        /// Bed assignments (colonist-to-bed mapping)
+        /// </summary>
+        public List<BedAssignment> BedAssignments { get; set; } = new();
+
+        /// <summary>
+        /// Power grid status
+        /// </summary>
+        public PowerGridStatus? PowerGrid { get; set; }
+
+        /// <summary>
+        /// Room quality data (full observations only)
+        /// </summary>
+        public List<RoomInfo> Rooms { get; set; } = new();
+
+        /// <summary>
+        /// Terrain fertility summary for farming placement (full observations only)
+        /// </summary>
+        public TerrainSummary? Terrain { get; set; }
     }
 
     /// <summary>
@@ -170,6 +195,84 @@ namespace RimWorld.GameRL.State
     }
 
     /// <summary>
+    /// Map metadata (static per map)
+    /// </summary>
+    public class MapInfo
+    {
+        public int Width { get; set; }
+        public int Height { get; set; }
+        public string Biome { get; set; } = "";
+        public float Elevation { get; set; }
+        public float Rainfall { get; set; }
+        public float Temperature { get; set; }
+    }
+
+    /// <summary>
+    /// Bed assignment info
+    /// </summary>
+    public class BedAssignment
+    {
+        public string BedId { get; set; } = "";
+        public string BedType { get; set; } = "";
+        public Position2D Position { get; set; } = new();
+        public bool IsMedical { get; set; }
+        public List<string> OwnerIds { get; set; } = new();
+    }
+
+    /// <summary>
+    /// Power grid status
+    /// </summary>
+    public class PowerGridStatus
+    {
+        public float TotalProduction { get; set; }
+        public float TotalConsumption { get; set; }
+        public float StoredEnergy { get; set; }
+        public float MaxStoredEnergy { get; set; }
+        public int GeneratorCount { get; set; }
+        public int BatteryCount { get; set; }
+        public bool HasSufficientPower { get; set; }
+    }
+
+    /// <summary>
+    /// Room quality info
+    /// </summary>
+    public class RoomInfo
+    {
+        public string Role { get; set; } = "";
+        public float Impressiveness { get; set; }
+        public float Beauty { get; set; }
+        public float Cleanliness { get; set; }
+        public float Temperature { get; set; }
+        public int CellCount { get; set; }
+    }
+
+    /// <summary>
+    /// A contiguous region of fertile terrain suitable for growing
+    /// </summary>
+    public class FertileRegion
+    {
+        public string TerrainType { get; set; } = "";
+        public float Fertility { get; set; }
+        public int CellCount { get; set; }
+        public Position2D Center { get; set; } = new();
+        public int MinX { get; set; }
+        public int MaxX { get; set; }
+        public int MinY { get; set; }
+        public int MaxY { get; set; }
+        public bool Roofed { get; set; }
+    }
+
+    /// <summary>
+    /// Terrain summary for farming/building placement decisions
+    /// </summary>
+    public class TerrainSummary
+    {
+        public List<FertileRegion> FertileRegions { get; set; } = new();
+        public int TotalFertileCells { get; set; }
+        public int TotalRichSoilCells { get; set; }
+    }
+
+    /// <summary>
     /// Episode tracking info for RL
     /// </summary>
     public class EpisodeInfo
@@ -215,9 +318,20 @@ namespace RimWorld.GameRL.State
     {
         public string Type { get; set; } = "";
 
+        public string? SubType { get; set; }
+
         public int Severity { get; set; }
 
         public int Count { get; set; }
+
+        public float[]? Position { get; set; }
+    }
+
+    public class AlertState
+    {
+        public string Label { get; set; } = "";
+
+        public int Severity { get; set; }  // 1=Normal, 2=High, 3=Critical
     }
 
     /// <summary>
@@ -238,6 +352,18 @@ namespace RimWorld.GameRL.State
 
         // Maximum pending events to prevent memory bloat
         private const int MaxPendingEvents = 100;
+
+        // Alert change tracking
+        private Dictionary<string, byte> _previousAlerts = new();  // label -> severity
+        private int _ticksSinceLastAlertCheck;
+        private const int AlertCheckIntervalTicks = 120;  // ~2 seconds at normal speed
+        private static bool _alertFieldDiscovered;
+        private static string? _discoveredAlertFieldName;
+
+        /// <summary>
+        /// Set to true when a high/critical alert appears, signaling immediate push.
+        /// </summary>
+        public bool HasUrgentEvents { get; set; }
 
         // Delta state tracking - per-agent snapshots
         private readonly Dictionary<string, Dictionary<string, ColonistSnapshot>> _previousColonistStates = new();
@@ -292,7 +418,12 @@ namespace RimWorld.GameRL.State
                 Zones = ExtractZones(map),
                 FactionRelations = ExtractFactionRelations(),
                 Prisoners = ExtractPrisoners(map),
-                ActiveTraders = ExtractTraders(map)
+                ActiveTraders = ExtractTraders(map),
+                Map = ExtractMapInfo(map),
+                BedAssignments = ExtractBedAssignments(map),
+                PowerGrid = ExtractPowerGrid(map),
+                Rooms = ExtractRooms(map),
+                Terrain = ExtractTerrainSummary(map)
             };
 
             // Include last action feedback for RL
@@ -355,7 +486,14 @@ namespace RimWorld.GameRL.State
                 PreviousHash = previousHash,
                 Alerts = ExtractAlerts(),
                 Events = ConvertToObservationEvents(CollectEvents()),
-                ValidActions = ComputeValidActions(map)
+                ValidActions = ComputeValidActions(map),
+                Research = ExtractResearch(),
+                Zones = ExtractZones(map),
+                FactionRelations = ExtractFactionRelations(),
+                Prisoners = ExtractPrisoners(map),
+                ActiveTraders = ExtractTraders(map),
+                BedAssignments = ExtractBedAssignments(map),
+                PowerGrid = ExtractPowerGrid(map)
             };
 
             // Include last action feedback
@@ -764,41 +902,131 @@ namespace RimWorld.GameRL.State
             return visitors;
         }
 
-        private List<string> ExtractAlerts()
+        private struct AlertInfo
         {
-            var alerts = new List<string>();
+            public string Label;
+            public byte Severity;  // 1=Normal, 2=High, 3=Critical
+        }
+
+        private static byte MapAlertSeverity(Alert alert)
+        {
+            try
+            {
+                return alert.Priority switch
+                {
+                    AlertPriority.Critical => 3,
+                    AlertPriority.High => 2,
+                    _ => 1
+                };
+            }
+            catch { return 1; }
+        }
+
+        private List<AlertInfo> ExtractAlertsWithSeverity()
+        {
+            var alerts = new List<AlertInfo>();
             try
             {
                 var uiRoot = Find.UIRoot as UIRoot_Play;
                 var alertsReadout = uiRoot?.alerts;
                 if (alertsReadout == null) return alerts;
 
-                // Access active alerts via reflection (AlertsReadout.activeAlerts is private)
-                var activeAlertsField = typeof(AlertsReadout).GetField("activeAlerts",
-                    System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-                if (activeAlertsField?.GetValue(alertsReadout) is List<Alert> activeAlerts)
+                List<Alert>? activeAlerts = null;
+                var bindingFlags = System.Reflection.BindingFlags.NonPublic
+                    | System.Reflection.BindingFlags.Public
+                    | System.Reflection.BindingFlags.Instance;
+
+                // Use cached field name if previously discovered
+                if (_discoveredAlertFieldName != null)
                 {
-                    // CRITICAL: Take a snapshot to avoid collection modified during iteration
-                    // The GUI thread can modify activeAlerts while we're reading it
+                    var field = typeof(AlertsReadout).GetField(_discoveredAlertFieldName, bindingFlags);
+                    if (field?.GetValue(alertsReadout) is List<Alert> found)
+                        activeAlerts = found;
+                    else
+                    {
+                        var prop = typeof(AlertsReadout).GetProperty(_discoveredAlertFieldName, bindingFlags);
+                        if (prop?.GetValue(alertsReadout) is List<Alert> foundProp)
+                            activeAlerts = foundProp;
+                    }
+                }
+
+                // Try multiple field/property names across RimWorld versions
+                if (activeAlerts == null)
+                {
+                    foreach (var fieldName in new[] { "activeAlerts", "curAlerts", "AllActiveAlerts", "AllAlerts", "AlertsListForReading" })
+                    {
+                        var field = typeof(AlertsReadout).GetField(fieldName, bindingFlags);
+                        if (field?.GetValue(alertsReadout) is List<Alert> found)
+                        {
+                            activeAlerts = found;
+                            if (!_alertFieldDiscovered)
+                            {
+                                _discoveredAlertFieldName = fieldName;
+                                _alertFieldDiscovered = true;
+                                Log.Message($"[GameRL] Alert field discovered: {fieldName}");
+                            }
+                            break;
+                        }
+                        var prop = typeof(AlertsReadout).GetProperty(fieldName, bindingFlags);
+                        if (prop?.GetValue(alertsReadout) is List<Alert> foundProp)
+                        {
+                            activeAlerts = foundProp;
+                            if (!_alertFieldDiscovered)
+                            {
+                                _discoveredAlertFieldName = fieldName;
+                                _alertFieldDiscovered = true;
+                                Log.Message($"[GameRL] Alert property discovered: {fieldName}");
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                // Fallback: scan all fields
+                if (activeAlerts == null)
+                {
+                    var fields = typeof(AlertsReadout).GetFields(bindingFlags);
+                    foreach (var f in fields)
+                    {
+                        if (f.GetValue(alertsReadout) is List<Alert> found)
+                        {
+                            activeAlerts = found;
+                            if (!_alertFieldDiscovered)
+                            {
+                                _discoveredAlertFieldName = f.Name;
+                                _alertFieldDiscovered = true;
+                                Log.Message($"[GameRL] Alert field discovered via scan: {f.Name}");
+                            }
+                            break;
+                        }
+                    }
+                }
+
+                if (!_alertFieldDiscovered)
+                {
+                    _alertFieldDiscovered = true;
+                    var allFields = typeof(AlertsReadout).GetFields(bindingFlags);
+                    Log.Warning($"[GameRL] Could not find alerts field. Available fields: {string.Join(", ", allFields.Select(f => $"{f.Name}:{f.FieldType.Name}"))}");
+                }
+
+                if (activeAlerts != null)
+                {
+                    // Filter for active alerts only — AllAlerts contains inactive alerts too
                     var alertSnapshot = activeAlerts.ToList();
 
                     foreach (var alert in alertSnapshot)
                     {
                         if (alert == null) continue;
-
                         try
                         {
-                            // GetLabel() can trigger GUI code that accesses null state
+                            if (!alert.Active) continue;
                             var label = alert.GetLabel();
                             if (!string.IsNullOrEmpty(label))
                             {
-                                alerts.Add(label);
+                                alerts.Add(new AlertInfo { Label = label, Severity = MapAlertSeverity(alert) });
                             }
                         }
-                        catch
-                        {
-                            // Skip alerts that throw during GetLabel()
-                        }
+                        catch { }
                     }
                 }
             }
@@ -807,6 +1035,88 @@ namespace RimWorld.GameRL.State
                 Log.Warning($"[GameRL] Failed to extract alerts: {ex.Message}");
             }
             return alerts;
+        }
+
+        private List<AlertState> ExtractAlerts()
+        {
+            return ExtractAlertsWithSeverity()
+                .Select(a => new AlertState { Label = a.Label, Severity = a.Severity })
+                .ToList();
+        }
+
+        /// <summary>
+        /// Check for alert changes and record events for new/resolved alerts.
+        /// </summary>
+        public void CheckAlertChanges()
+        {
+            try
+            {
+                var currentAlerts = ExtractAlertsWithSeverity();
+                var currentByLabel = new Dictionary<string, byte>();
+                foreach (var a in currentAlerts)
+                    currentByLabel[a.Label] = a.Severity;
+
+                foreach (var alert in currentAlerts)
+                {
+                    if (!_previousAlerts.ContainsKey(alert.Label))
+                    {
+                        RecordEvent($"AlertAppeared:{alert.Label}", alert.Severity, new
+                        {
+                            Alert = alert.Label,
+                            Severity = (int)alert.Severity
+                        });
+                        if (alert.Severity >= 2)
+                            HasUrgentEvents = true;
+                    }
+                }
+
+                foreach (var prev in _previousAlerts)
+                {
+                    if (!currentByLabel.ContainsKey(prev.Key))
+                    {
+                        RecordEvent($"AlertResolved:{prev.Key}", 1, new
+                        {
+                            Alert = prev.Key
+                        });
+                    }
+                }
+
+                _previousAlerts = currentByLabel;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[GameRL] Failed to check alert changes: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Call every tick to check alerts at the configured interval.
+        /// </summary>
+        public void TickAlertCheck()
+        {
+            _ticksSinceLastAlertCheck++;
+            if (_ticksSinceLastAlertCheck >= AlertCheckIntervalTicks)
+            {
+                _ticksSinceLastAlertCheck = 0;
+                CheckAlertChanges();
+            }
+        }
+
+        /// <summary>
+        /// Returns the last-known active alerts with severity (cached, no re-extraction).
+        /// </summary>
+        public List<AlertState> GetCurrentAlerts()
+        {
+            return _previousAlerts.Select(kv => new AlertState { Label = kv.Key, Severity = kv.Value }).ToList();
+        }
+
+        /// <summary>
+        /// Clear alert tracking state (called on reset).
+        /// </summary>
+        public void ClearAlertState()
+        {
+            _previousAlerts.Clear();
+            _ticksSinceLastAlertCheck = 0;
         }
 
         private int CountIdleColonists(Map? map)
@@ -825,48 +1135,91 @@ namespace RimWorld.GameRL.State
             }
         }
 
-        private List<ThreatInfo> ExtractThreats(Map? map)
+        internal List<ThreatInfo> ExtractThreats(Map? map)
         {
             var threats = new List<ThreatInfo>();
             if (map == null) return threats;
 
             try
             {
-                // Hostile pawns
+                // Hostile pawns — split into raiders vs manhunters
                 var pawnSnapshot = map.mapPawns.AllPawnsSpawned.ToList();
-                var hostileCount = pawnSnapshot
-                    .Count(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer));
-                if (hostileCount > 0)
+                var hostilePawns = pawnSnapshot
+                    .Where(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer))
+                    .ToList();
+
+                var manhunters = hostilePawns
+                    .Where(p => p.MentalStateDef?.defName?.Contains("Manhunter") == true)
+                    .ToList();
+                var raiders = hostilePawns.Except(manhunters).ToList();
+
+                if (raiders.Count > 0)
                 {
                     threats.Add(new ThreatInfo
                     {
                         Type = "hostile_pawns",
-                        Severity = hostileCount > 10 ? 3 : hostileCount > 5 ? 2 : 1,
-                        Count = hostileCount
+                        Severity = raiders.Count > 10 ? 3 : raiders.Count > 5 ? 2 : 1,
+                        Count = raiders.Count,
+                        Position = Centroid(raiders)
                     });
                 }
 
+                if (manhunters.Count > 0)
+                {
+                    threats.Add(new ThreatInfo
+                    {
+                        Type = "manhunter",
+                        SubType = manhunters.First().def?.defName,
+                        Severity = manhunters.Count > 5 ? 3 : manhunters.Count > 2 ? 2 : 1,
+                        Count = manhunters.Count,
+                        Position = Centroid(manhunters)
+                    });
+                }
+
+                // Mental breaks among colonists
+                var mentalBreakPawns = map.mapPawns.FreeColonists?
+                    .Where(p => p != null && !p.Destroyed && p.InMentalState)
+                    .ToList();
+                if (mentalBreakPawns != null)
+                {
+                    foreach (var p in mentalBreakPawns)
+                    {
+                        threats.Add(new ThreatInfo
+                        {
+                            Type = "mental_break",
+                            SubType = p.MentalStateDef?.defName,
+                            Severity = 2,
+                            Count = 1,
+                            Position = new float[] { p.Position.x, p.Position.z }
+                        });
+                    }
+                }
+
                 // Fire
-                var fireCount = map.listerThings.ThingsOfDef(ThingDefOf.Fire)?.Count ?? 0;
+                var fires = map.listerThings.ThingsOfDef(ThingDefOf.Fire);
+                var fireCount = fires?.Count ?? 0;
                 if (fireCount > 0)
                 {
                     threats.Add(new ThreatInfo
                     {
                         Type = "fire",
                         Severity = fireCount > 20 ? 3 : fireCount > 5 ? 2 : 1,
-                        Count = fireCount
+                        Count = fireCount,
+                        Position = Centroid(fires)
                     });
                 }
 
                 // Blight on crops
-                var blightCount = map.listerThings.ThingsOfDef(ThingDefOf.Blight)?.Count ?? 0;
+                var blights = map.listerThings.ThingsOfDef(ThingDefOf.Blight);
+                var blightCount = blights?.Count ?? 0;
                 if (blightCount > 0)
                 {
                     threats.Add(new ThreatInfo
                     {
                         Type = "blight",
                         Severity = blightCount > 20 ? 2 : 1,
-                        Count = blightCount
+                        Count = blightCount,
+                        Position = Centroid(blights)
                     });
                 }
 
@@ -901,14 +1254,16 @@ namespace RimWorld.GameRL.State
                 var mechClusterDef = DefDatabase<ThingDef>.GetNamed("MechCluster", errorOnFail: false);
                 if (mechClusterDef != null)
                 {
-                    var mechCount = map.listerThings.ThingsOfDef(mechClusterDef)?.Count ?? 0;
+                    var mechs = map.listerThings.ThingsOfDef(mechClusterDef);
+                    var mechCount = mechs?.Count ?? 0;
                     if (mechCount > 0)
                     {
                         threats.Add(new ThreatInfo
                         {
                             Type = "mech_cluster",
                             Severity = 3,
-                            Count = mechCount
+                            Count = mechCount,
+                            Position = Centroid(mechs)
                         });
                     }
                 }
@@ -917,14 +1272,16 @@ namespace RimWorld.GameRL.State
                 var hiveDef = DefDatabase<ThingDef>.GetNamed("Hive", errorOnFail: false);
                 if (hiveDef != null)
                 {
-                    var hiveCount = map.listerThings.ThingsOfDef(hiveDef)?.Count ?? 0;
+                    var hives = map.listerThings.ThingsOfDef(hiveDef);
+                    var hiveCount = hives?.Count ?? 0;
                     if (hiveCount > 0)
                     {
                         threats.Add(new ThreatInfo
                         {
                             Type = "infestation",
                             Severity = hiveCount > 3 ? 3 : 2,
-                            Count = hiveCount
+                            Count = hiveCount,
+                            Position = Centroid(hives)
                         });
                     }
                 }
@@ -935,6 +1292,22 @@ namespace RimWorld.GameRL.State
             }
 
             return threats;
+        }
+
+        private static float[]? Centroid(IEnumerable<Thing>? things)
+        {
+            if (things == null) return null;
+            float sumX = 0, sumZ = 0;
+            int count = 0;
+            foreach (var t in things)
+            {
+                if (t == null) continue;
+                sumX += t.Position.x;
+                sumZ += t.Position.z;
+                count++;
+            }
+            if (count == 0) return null;
+            return new float[] { sumX / count, sumZ / count };
         }
 
         private ResearchInfo ExtractResearch()
@@ -1014,11 +1387,14 @@ namespace RimWorld.GameRL.State
             var valid = new List<string>();
 
             // Always valid: meta/game actions
-            valid.Add("Wait");
             valid.Add("SetSpeed");
             valid.Add("Unpause");
             valid.Add("RequestFullState");
             valid.Add("ListWorkbenches");
+            valid.Add("ListBuildables");
+            valid.Add("SaveCheckpoint");
+            valid.Add("LoadCheckpoint");
+            valid.Add("DismissLetters");
 
             if (map == null) return valid;
 
@@ -1064,17 +1440,38 @@ namespace RimWorld.GameRL.State
                     if (hasHostiles) valid.Add("Attack");
                 }
                 catch { }
+
+                // Arrest requires drafted pawn AND non-hostile humanlike non-colonist on map
+                try
+                {
+                    var hasArrestable = map.mapPawns.AllPawnsSpawned
+                        .Any(p => p != null && !p.Destroyed && p.Spawned && p.RaceProps.Humanlike
+                            && p.Faction != Faction.OfPlayer && !p.HostileTo(Faction.OfPlayer)
+                            && !p.IsPrisoner);
+                    if (hasArrestable) valid.Add("Arrest");
+                }
+                catch { }
             }
 
-            // Hunting requires animals on map
+            // Animals on map — hunting and taming
             try
             {
-                var hasAnimals = map.mapPawns.AllPawnsSpawned
-                    .Any(p => p != null && !p.Destroyed && p.Spawned && p.RaceProps.Animal);
-                if (hasAnimals)
+                var spawnedAnimals = map.mapPawns.AllPawnsSpawned
+                    .Where(p => p != null && !p.Destroyed && p.Spawned && p.RaceProps.Animal).ToList();
+                if (spawnedAnimals.Count > 0)
                 {
                     valid.Add("DesignateHunt");
                     valid.Add("CancelHunt");
+                    // Taming requires wild (non-player) animals
+                    if (spawnedAnimals.Any(p => p.Faction != Faction.OfPlayer))
+                        valid.Add("DesignateTame");
+                    // Training/area/slaughter require tamed animals
+                    if (spawnedAnimals.Any(p => p.Faction == Faction.OfPlayer))
+                    {
+                        valid.Add("SetAnimalTraining");
+                        valid.Add("SetAnimalArea");
+                        valid.Add("DesignateSlaughter");
+                    }
                 }
             }
             catch { }
@@ -1164,6 +1561,66 @@ namespace RimWorld.GameRL.State
                     if (hasTendable) valid.Add("TendTo");
                 }
                 catch { }
+
+                // Surgery
+                valid.Add("OperateSurgery");
+            }
+
+            // Schedule and bed management
+            if (hasNonDownedColonist)
+            {
+                valid.Add("SetSchedule");
+                try
+                {
+                    var hasBeds = map.listerBuildings.allBuildingsColonist
+                        .Any(b => b is Building_Bed bed && !bed.ForPrisoners && !bed.Medical);
+                    if (hasBeds) valid.Add("AssignBed");
+                }
+                catch { }
+            }
+
+            // Deconstruct (requires any deconstructible building on map, not just colonist-owned)
+            try
+            {
+                var hasDeconstructible = map.listerBuildings.allBuildingsColonist.Count > 0
+                    || map.listerBuildings.allBuildingsNonColonist.Any(b => b.DeconstructibleBy(Faction.OfPlayer));
+                if (hasDeconstructible) valid.Add("Deconstruct");
+            }
+            catch { }
+
+            // Repair (requires damaged buildings and non-downed colonist)
+            if (hasNonDownedColonist)
+            {
+                try
+                {
+                    var hasDamaged = map.listerBuildings.allBuildingsColonist
+                        .Any(b => b.HitPoints < b.MaxHitPoints);
+                    if (hasDamaged) valid.Add("DesignateRepair");
+                }
+                catch { }
+            }
+
+            // SmoothFloor (always valid when map exists)
+            valid.Add("SmoothFloor");
+
+            // Trade (requires active traders and silver)
+            try
+            {
+                var hasTraders = map.mapPawns.AllPawnsSpawned
+                    .Any(p => p != null && !p.Destroyed && p.Spawned && p.TraderKind != null && p.Faction != Faction.OfPlayer)
+                    || (map.passingShipManager?.passingShips?.Any(s => s is TradeShip) ?? false);
+                if (hasTraders)
+                {
+                    var hasSilver = map.resourceCounter.GetCount(ThingDefOf.Silver) > 0;
+                    if (hasSilver) valid.Add("Trade");
+                }
+            }
+            catch { }
+
+            // FormCaravan (requires at least 1 non-downed colonist)
+            if (colonists.Any(p => !p.Downed))
+            {
+                valid.Add("FormCaravan");
             }
 
             return valid;
@@ -1321,12 +1778,27 @@ namespace RimWorld.GameRL.State
                         // TradeShip is the tradeable subclass
                         if (ship is TradeShip tradeShip)
                         {
+                            int silver = 0;
+                            try
+                            {
+                                var goods = tradeShip.Goods;
+                                if (goods != null)
+                                {
+                                    foreach (var thing in goods)
+                                    {
+                                        if (thing?.def == ThingDefOf.Silver)
+                                            silver += thing.stackCount;
+                                    }
+                                }
+                            }
+                            catch { }
+
                             traders.Add(new TraderInfo
                             {
                                 Name = tradeShip.name ?? "Unknown",
                                 Type = "Orbital",
                                 Faction = tradeShip.Faction?.Name,
-                                Silver = 0
+                                Silver = silver
                             });
                         }
                     }
@@ -1343,12 +1815,27 @@ namespace RimWorld.GameRL.State
                     var traderName = pawn.LabelShort;
                     if (!traders.Any(t => t.Name == traderName))
                     {
+                        int silver = 0;
+                        try
+                        {
+                            var goods = pawn.trader?.Goods;
+                            if (goods != null)
+                            {
+                                foreach (var thing in goods)
+                                {
+                                    if (thing?.def == ThingDefOf.Silver)
+                                        silver += thing.stackCount;
+                                }
+                            }
+                        }
+                        catch { }
+
                         traders.Add(new TraderInfo
                         {
                             Name = traderName,
                             Type = "Visitor",
                             Faction = pawn.Faction?.Name,
-                            Silver = 0
+                            Silver = silver
                         });
                     }
                 }
@@ -1358,6 +1845,230 @@ namespace RimWorld.GameRL.State
                 // Return partial results
             }
             return traders;
+        }
+
+        private TerrainSummary? ExtractTerrainSummary(Map? map)
+        {
+            if (map == null) return null;
+            try
+            {
+                var summary = new TerrainSummary();
+                var fertileByType = new Dictionary<string, List<IntVec3>>();
+
+                // Scan map for fertile cells (fertility > 0)
+                var mapGrid = map.terrainGrid;
+                var roofGrid = map.roofGrid;
+                for (int x = 0; x < map.Size.x; x++)
+                {
+                    for (int z = 0; z < map.Size.z; z++)
+                    {
+                        var cell = new IntVec3(x, 0, z);
+                        var terrain = mapGrid.TerrainAt(cell);
+                        if (terrain == null || terrain.fertility <= 0f) continue;
+
+                        // Skip cells with buildings on them
+                        if (cell.GetEdifice(map) != null) continue;
+
+                        var key = terrain.defName;
+                        if (!fertileByType.ContainsKey(key))
+                            fertileByType[key] = new List<IntVec3>();
+                        fertileByType[key].Add(cell);
+                    }
+                }
+
+                // Build regions per terrain type using spatial clustering
+                foreach (var kvp in fertileByType)
+                {
+                    var terrainDef = DefDatabase<TerrainDef>.GetNamed(kvp.Key, errorOnFail: false);
+                    float fertility = terrainDef?.fertility ?? 1f;
+                    var cells = kvp.Value;
+
+                    summary.TotalFertileCells += cells.Count;
+                    if (kvp.Key == "SoilRich")
+                        summary.TotalRichSoilCells = cells.Count;
+
+                    // Cluster cells into regions using simple grid bucketing (16x16 chunks)
+                    var buckets = new Dictionary<(int, int), List<IntVec3>>();
+                    foreach (var cell in cells)
+                    {
+                        var bucket = (cell.x / 16, cell.z / 16);
+                        if (!buckets.ContainsKey(bucket))
+                            buckets[bucket] = new List<IntVec3>();
+                        buckets[bucket].Add(cell);
+                    }
+
+                    foreach (var bucket in buckets.Values)
+                    {
+                        if (bucket.Count < 4) continue; // Skip tiny patches
+
+                        var minX = bucket.Min(c => c.x);
+                        var maxX = bucket.Max(c => c.x);
+                        var minZ = bucket.Min(c => c.z);
+                        var maxZ = bucket.Max(c => c.z);
+                        var centerX = (minX + maxX) / 2;
+                        var centerZ = (minZ + maxZ) / 2;
+
+                        // Check if mostly roofed
+                        int roofedCount = 0;
+                        foreach (var c in bucket)
+                        {
+                            if (roofGrid.Roofed(c)) roofedCount++;
+                        }
+
+                        summary.FertileRegions.Add(new FertileRegion
+                        {
+                            TerrainType = kvp.Key,
+                            Fertility = fertility,
+                            CellCount = bucket.Count,
+                            Center = new Position2D(centerX, centerZ),
+                            MinX = minX,
+                            MaxX = maxX,
+                            MinY = minZ,
+                            MaxY = maxZ,
+                            Roofed = roofedCount > bucket.Count / 2
+                        });
+                    }
+                }
+
+                // Sort by fertility descending, then by cell count
+                summary.FertileRegions.Sort((a, b) =>
+                {
+                    int cmp = b.Fertility.CompareTo(a.Fertility);
+                    return cmp != 0 ? cmp : b.CellCount.CompareTo(a.CellCount);
+                });
+
+                return summary;
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[GameRL] Failed to extract terrain summary: {ex.Message}");
+                return null;
+            }
+        }
+
+        private MapInfo? ExtractMapInfo(Map? map)
+        {
+            if (map == null) return null;
+            try
+            {
+                return new MapInfo
+                {
+                    Width = map.Size.x,
+                    Height = map.Size.z,
+                    Biome = map.Biome?.defName ?? "Unknown",
+                    Elevation = map.TileInfo?.elevation ?? 0f,
+                    Rainfall = map.TileInfo?.rainfall ?? 0f,
+                    Temperature = map.TileInfo?.temperature ?? 0f
+                };
+            }
+            catch { return null; }
+        }
+
+        private List<BedAssignment> ExtractBedAssignments(Map? map)
+        {
+            var assignments = new List<BedAssignment>();
+            if (map == null) return assignments;
+
+            try
+            {
+                foreach (var building in map.listerBuildings.allBuildingsColonist)
+                {
+                    if (building is Building_Bed bed)
+                    {
+                        var ownerIds = new List<string>();
+                        try
+                        {
+                            foreach (var owner in bed.OwnersForReading)
+                            {
+                                if (owner != null)
+                                    ownerIds.Add(owner.ThingID);
+                            }
+                        }
+                        catch { }
+
+                        assignments.Add(new BedAssignment
+                        {
+                            BedId = bed.ThingID,
+                            BedType = bed.def.defName,
+                            Position = new Position2D(bed.Position.x, bed.Position.z),
+                            IsMedical = bed.Medical,
+                            OwnerIds = ownerIds
+                        });
+                    }
+                }
+            }
+            catch { }
+            return assignments;
+        }
+
+        private PowerGridStatus? ExtractPowerGrid(Map? map)
+        {
+            if (map == null) return null;
+
+            try
+            {
+                var status = new PowerGridStatus();
+                var powerNets = map.powerNetManager.AllNetsListForReading;
+
+                foreach (var net in powerNets)
+                {
+                    foreach (var comp in net.powerComps)
+                    {
+                        if (comp.PowerOutput > 0)
+                            status.TotalProduction += comp.PowerOutput;
+                        else
+                            status.TotalConsumption += -comp.PowerOutput;
+                    }
+
+                    foreach (var battery in net.batteryComps)
+                    {
+                        status.StoredEnergy += battery.StoredEnergy;
+                        status.MaxStoredEnergy += battery.Props.storedEnergyMax;
+                        status.BatteryCount++;
+                    }
+                }
+
+                status.GeneratorCount = map.listerBuildings.allBuildingsColonist
+                    .Count(b => b.TryGetComp<CompPowerPlant>() != null);
+                status.HasSufficientPower = status.TotalProduction >= status.TotalConsumption;
+
+                return status;
+            }
+            catch { return null; }
+        }
+
+        private List<RoomInfo> ExtractRooms(Map? map)
+        {
+            var rooms = new List<RoomInfo>();
+            if (map == null) return rooms;
+
+            try
+            {
+                // Collect unique rooms from colonist buildings (beds, workbenches, etc.)
+                var seenRooms = new HashSet<int>();
+                foreach (var building in map.listerBuildings.allBuildingsColonist)
+                {
+                    if (rooms.Count >= 50) break;  // Cap for performance
+                    var room = building.GetRoom();
+                    if (room == null || room.IsHuge || room.TouchesMapEdge) continue;
+                    if (!seenRooms.Add(room.ID)) continue;  // Skip duplicates
+
+                    var role = room.Role;
+                    if (role == null || role == RoomRoleDefOf.None) continue;
+
+                    rooms.Add(new RoomInfo
+                    {
+                        Role = role.defName,
+                        Impressiveness = room.GetStat(RoomStatDefOf.Impressiveness),
+                        Beauty = room.GetStat(RoomStatDefOf.Beauty),
+                        Cleanliness = room.GetStat(RoomStatDefOf.Cleanliness),
+                        Temperature = room.Temperature,
+                        CellCount = room.CellCount
+                    });
+                }
+            }
+            catch { }
+            return rooms;
         }
 
         public string ComputeStateHash()
@@ -1484,65 +2195,75 @@ namespace RimWorld.GameRL.State
         {
             return new Dictionary<string, object>
             {
-                ["type"] = "discrete_parameterized",
+                ["format"] = "Action is a flat JSON object with \"Type\" as the action name and all parameters as top-level keys. Example: {\"Type\": \"Draft\", \"ColonistId\": \"Human123\"} or {\"Type\": \"SetWorkPriority\", \"ColonistId\": \"Lizzie\", \"WorkType\": \"Construction\", \"Priority\": 1}",
                 ["actions"] = new object[]
                 {
                     // Basic actions
-                    new { name = "Wait", description = "Do nothing, advance simulation", @params = new Dictionary<string, object>() },
-                    new { name = "Draft", description = "Draft a colonist for direct control", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" } } },
-                    new { name = "Undraft", description = "Undraft a colonist", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" } } },
-                    new { name = "Move", description = "Move a drafted pawn to coordinates", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["X"] = new { type = "int" }, ["Y"] = new { type = "int" } } },
-                    new { name = "MoveToEntity", description = "Move toward a target entity", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } },
+                    new { Type = "Draft", description = "Draft a colonist for direct control", ColonistId = "entity_id" },
+                    new { Type = "Undraft", description = "Undraft a colonist", ColonistId = "entity_id" },
+                    new { Type = "Move", description = "Move a drafted pawn to coordinates", ColonistId = "entity_id", X = "int", Y = "int" },
+                    new { Type = "MoveToEntity", description = "Move toward a target entity", ColonistId = "entity_id", TargetId = "entity_id" },
 
                     // Work management
-                    new { name = "SetWorkPriority", description = "Set work priority (0=disabled, 1=highest, 4=lowest)", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["WorkType"] = new { type = "string" }, ["Priority"] = new { type = "int", min = 0, max = 4 } } },
-                    new { name = "SetMedicalCare", description = "Set medical care level (nocare/nomeds/herbal/normal/best)", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["CareLevel"] = new { type = "string" } } },
+                    new { Type = "SetWorkPriority", description = "Set work priority (0=disabled, 1=highest, 4=lowest)", ColonistId = "entity_id", WorkType = "string", Priority = "int 0-4" },
+                    new { Type = "SetMedicalCare", description = "Set medical care level (nocare/nomeds/herbal/normal/best)", ColonistId = "entity_id", CareLevel = "string" },
 
                     // Combat
-                    new { name = "Attack", description = "Force a drafted pawn to attack", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } },
-                    new { name = "DesignateHunt", description = "Mark an animal for hunting", @params = new Dictionary<string, object> { ["TargetId"] = new { type = "entity_id" } } },
-                    new { name = "CancelHunt", description = "Remove hunting designation", @params = new Dictionary<string, object> { ["TargetId"] = new { type = "entity_id" } } },
+                    new { Type = "Attack", description = "Force a drafted pawn to attack", ColonistId = "entity_id", TargetId = "entity_id" },
+                    new { Type = "DesignateHunt", description = "Mark an animal for hunting", TargetId = "entity_id" },
+                    new { Type = "CancelHunt", description = "Remove hunting designation", TargetId = "entity_id" },
 
                     // Items
-                    new { name = "Equip", description = "Have a pawn equip a weapon", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["WeaponId"] = new { type = "entity_id" } } },
-                    new { name = "Haul", description = "Force a pawn to haul an item", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["ItemId"] = new { type = "entity_id" } } },
-                    new { name = "Unforbid", description = "Unforbid a specific item", @params = new Dictionary<string, object> { ["ThingId"] = new { type = "entity_id" } } },
-                    new { name = "UnforbidByType", description = "Unforbid all items of a type (e.g., MealSurvivalPack)", @params = new Dictionary<string, object> { ["DefName"] = new { type = "string" } } },
-                    new { name = "UnforbidArea", description = "Unforbid all items in a radius", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Radius"] = new { type = "int" } } },
+                    new { Type = "Equip", description = "Have a pawn equip a weapon", ColonistId = "entity_id", WeaponId = "entity_id" },
+                    new { Type = "Haul", description = "Force a pawn to haul an item", ColonistId = "entity_id", ItemId = "entity_id" },
+                    new { Type = "Unforbid", description = "Unforbid a specific item", ThingId = "entity_id" },
+                    new { Type = "UnforbidByType", description = "Unforbid all items of a type (e.g., MealSurvivalPack)", DefName = "string" },
+                    new { Type = "UnforbidArea", description = "Unforbid all items in a radius", X = "int", Y = "int", Radius = "int" },
 
                     // Production
-                    new { name = "AddBill", description = "Add a production bill to a workbench", @params = new Dictionary<string, object> { ["BuildingId"] = new { type = "entity_id" }, ["Recipe"] = new { type = "string" }, ["Count"] = new { type = "int" } } },
-                    new { name = "CancelBill", description = "Remove a bill from a workbench", @params = new Dictionary<string, object> { ["BuildingId"] = new { type = "entity_id" }, ["BillIndex"] = new { type = "int" } } },
-                    new { name = "ModifyBill", description = "Modify a bill's count or repeat mode", @params = new Dictionary<string, object> { ["BuildingId"] = new { type = "entity_id" }, ["BillIndex"] = new { type = "int" }, ["Count"] = new { type = "int", optional = true }, ["RepeatForever"] = new { type = "bool", optional = true } } },
+                    new { Type = "AddBill", description = "Add a production bill to a workbench", BuildingId = "entity_id", Recipe = "string", Count = "int" },
+                    new { Type = "CancelBill", description = "Remove a bill from a workbench", BuildingId = "entity_id", BillIndex = "int" },
+                    new { Type = "ModifyBill", description = "Modify a bill's count or repeat mode", BuildingId = "entity_id", BillIndex = "int", Count = "int (optional)", RepeatForever = "bool (optional)" },
 
                     // Construction & Zones
-                    new { name = "PlaceBlueprint", description = "Place a building blueprint", @params = new Dictionary<string, object> { ["Building"] = new { type = "string" }, ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Rotation"] = new { type = "int", optional = true }, ["Stuff"] = new { type = "string", optional = true } } },
-                    new { name = "CreateStockpile", description = "Create a stockpile zone", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Width"] = new { type = "int" }, ["Height"] = new { type = "int" } } },
-                    new { name = "CreateGrowingZone", description = "Create a growing zone", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Width"] = new { type = "int" }, ["Height"] = new { type = "int" }, ["Plant"] = new { type = "string", optional = true } } },
-                    new { name = "DesignateMine", description = "Designate area for mining", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Radius"] = new { type = "int" } } },
-                    new { name = "DesignateCutPlants", description = "Designate plants for cutting", @params = new Dictionary<string, object> { ["X"] = new { type = "int" }, ["Y"] = new { type = "int" }, ["Radius"] = new { type = "int" } } },
+                    new { Type = "PlaceBlueprint", description = "Place a building blueprint", Building = "string", X = "int", Y = "int", Rotation = "int (optional)", Stuff = "string (optional)" },
+                    new { Type = "CreateStockpile", description = "Create a stockpile zone", X = "int", Y = "int", Width = "int", Height = "int" },
+                    new { Type = "CreateGrowingZone", description = "Create a growing zone", X = "int", Y = "int", Width = "int", Height = "int", Plant = "string (optional)" },
+                    new { Type = "DesignateMine", description = "Designate area for mining", X = "int", Y = "int", Radius = "int" },
+                    new { Type = "DesignateCutPlants", description = "Designate plants for cutting", X = "int", Y = "int", Radius = "int" },
 
                     // Social
-                    new { name = "Chat", description = "Initiate social interaction", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } },
+                    new { Type = "Chat", description = "Initiate social interaction", ColonistId = "entity_id", TargetId = "entity_id" },
 
                     // Game control
-                    new { name = "SetSpeed", description = "Set game speed (0=paused, 1=normal, 2=fast, 3=superfast)", @params = new Dictionary<string, object> { ["Speed"] = new { type = "int", min = 0, max = 3 } } },
-                    new { name = "Unpause", description = "Resume the game at normal speed", @params = new Dictionary<string, object>() },
+                    new { Type = "SetSpeed", description = "Set game speed (0=paused, 1=normal, 2=fast, 3=superfast)", Speed = "int 0-3" },
+                    new { Type = "Unpause", description = "Resume the game at normal speed" },
 
                     // Research
-                    new { name = "SelectResearch", description = "Select a research project to work on", @params = new Dictionary<string, object> { ["ProjectDefName"] = new { type = "string" } } },
+                    new { Type = "SelectResearch", description = "Select a research project to work on", ProjectDefName = "string" },
 
                     // Zone management
-                    new { name = "DeleteZone", description = "Delete a zone by label", @params = new Dictionary<string, object> { ["ZoneLabel"] = new { type = "string" } } },
-                    new { name = "SetStockpilePriority", description = "Set stockpile priority (1-5)", @params = new Dictionary<string, object> { ["ZoneLabel"] = new { type = "string" }, ["Priority"] = new { type = "int", min = 1, max = 5 } } },
-                    new { name = "SetGrowingPlant", description = "Change growing zone plant type", @params = new Dictionary<string, object> { ["ZoneLabel"] = new { type = "string" }, ["PlantDefName"] = new { type = "string" } } },
+                    new { Type = "DeleteZone", description = "Delete a zone by label", ZoneLabel = "string" },
+                    new { Type = "SetStockpilePriority", description = "Set stockpile priority (1-5)", ZoneLabel = "string", Priority = "int 1-5" },
+                    new { Type = "SetGrowingPlant", description = "Change growing zone plant type", ZoneLabel = "string", PlantDefName = "string" },
 
                     // Prisoner management
-                    new { name = "SetPrisonerInteraction", description = "Set prisoner interaction mode", @params = new Dictionary<string, object> { ["PrisonerId"] = new { type = "entity_id" }, ["Mode"] = new { type = "string" } } },
+                    new { Type = "SetPrisonerInteraction", description = "Set prisoner interaction mode", PrisonerId = "entity_id", Mode = "string" },
 
                     // Medical
-                    new { name = "Rescue", description = "Rescue a downed pawn to a bed", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } },
-                    new { name = "TendTo", description = "Have a doctor tend to an injured/sick pawn", @params = new Dictionary<string, object> { ["ColonistId"] = new { type = "entity_id" }, ["TargetId"] = new { type = "entity_id" } } }
+                    new { Type = "Rescue", description = "Rescue a downed pawn to a bed", ColonistId = "entity_id", TargetId = "entity_id" },
+                    new { Type = "TendTo", description = "Have a doctor tend to an injured/sick pawn", ColonistId = "entity_id", TargetId = "entity_id" },
+
+                    // Animals
+                    new { Type = "DesignateTame", description = "Mark a wild animal for taming", TargetId = "entity_id" },
+                    new { Type = "SetAnimalTraining", description = "Toggle training for a tamed animal (Obedience, Release, Rescue, Haul)", AnimalId = "entity_id", TrainingDef = "string", Enabled = "bool" },
+                    new { Type = "SetAnimalArea", description = "Restrict animal to an area (or 'Unrestricted')", AnimalId = "entity_id", AreaLabel = "string" },
+                    new { Type = "DesignateSlaughter", description = "Mark a tamed animal for slaughter", AnimalId = "entity_id" },
+
+                    // Episode management
+                    new { Type = "SaveCheckpoint", description = "Save game state for episode reset", Name = "string" },
+                    new { Type = "LoadCheckpoint", description = "Load a saved game checkpoint", Name = "string" },
+                    new { Type = "DismissLetters", description = "Dismiss all pending letter notifications" }
                 }
             };
         }
@@ -1551,28 +2272,11 @@ namespace RimWorld.GameRL.State
         {
             return new Dictionary<string, object>
             {
-                ["type"] = "discrete_parameterized",
-                ["actions"] = new[]
+                ["format"] = "Action is a flat JSON object with \"Type\" as the action name and all parameters as top-level keys. Example: {\"Type\": \"Move\", \"X\": 50, \"Y\": 30}",
+                ["actions"] = new object[]
                 {
-                    new {
-                        name = "move",
-                        @params = new Dictionary<string, object>
-                        {
-                            ["x"] = new { type = "int" },
-                            ["z"] = new { type = "int" }
-                        }
-                    },
-                    new {
-                        name = "interact",
-                        @params = new Dictionary<string, object>
-                        {
-                            ["target_id"] = new { type = "entity_id" }
-                        }
-                    },
-                    new {
-                        name = "wait",
-                        @params = new Dictionary<string, object>()
-                    }
+                    new { Type = "Move", description = "Move to coordinates", X = "int", Y = "int" },
+                    new { Type = "Interact", description = "Interact with a target", TargetId = "entity_id" }
                 }
             };
         }

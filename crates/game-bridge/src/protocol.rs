@@ -98,6 +98,20 @@ pub enum GameMessage {
         descriptors: Vec<StreamDescriptor>,
     },
 
+    /// Episode summary with cumulative metrics
+    EpisodeSummary {
+        #[serde(rename = "TotalReward")]
+        total_reward: f64,
+        #[serde(rename = "StepCount")]
+        step_count: u64,
+        #[serde(rename = "TicksElapsed")]
+        ticks_elapsed: u64,
+        #[serde(rename = "RewardBreakdown")]
+        reward_breakdown: HashMap<String, f64>,
+        #[serde(rename = "TerminationReason")]
+        termination_reason: Option<String>,
+    },
+
     /// Error response
     Error {
         #[serde(rename = "Code")]
@@ -144,6 +158,9 @@ pub enum GameMessage {
     /// Request state hash
     GetStateHash,
 
+    /// Observe current state without ticking or executing actions
+    Observe,
+
     /// Configure vision streams
     ConfigureStreams {
         #[serde(rename = "AgentId")]
@@ -151,6 +168,9 @@ pub enum GameMessage {
         #[serde(rename = "Profile")]
         profile: String,
     },
+
+    /// Request episode summary
+    GetEpisodeSummary,
 
     /// Shutdown the game
     Shutdown,

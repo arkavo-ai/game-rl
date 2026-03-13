@@ -118,7 +118,7 @@ impl GameRLClient {
     ) -> Result<AgentManifest> {
         let result = self
             .call_tool(
-                "register_agent",
+                "registerAgent",
                 serde_json::json!({
                     "agent_id": agent_id,
                     "agent_type": agent_type,
@@ -139,7 +139,7 @@ impl GameRLClient {
     ) -> Result<StepResult> {
         let result = self
             .call_tool(
-                "sim_step",
+                "step",
                 serde_json::json!({
                     "agent_id": agent_id,
                     "action": action,
@@ -173,14 +173,14 @@ impl GameRLClient {
     /// Get state hash for determinism verification
     pub async fn state_hash(&mut self) -> Result<String> {
         let result = self
-            .call_tool("get_state_hash", serde_json::json!({}))
+            .call_tool("stateHash", serde_json::json!({}))
             .await?;
 
         result
             .get("hash")
             .and_then(|h| h.as_str())
             .map(|s| s.to_string())
-            .ok_or_else(|| GameRLError::ProtocolError("Invalid state_hash response".into()))
+            .ok_or_else(|| GameRLError::ProtocolError("Invalid stateHash response".into()))
     }
 
     /// Call an MCP tool

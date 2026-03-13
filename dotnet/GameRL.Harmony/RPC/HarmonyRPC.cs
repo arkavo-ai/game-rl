@@ -30,8 +30,12 @@ namespace GameRL.Harmony.RPC
     {
         public bool Success { get; set; }
         public string? ErrorMessage { get; set; }
+        /// <summary>
+        /// Return value from the action method (e.g., string from ListWorkbenches)
+        /// </summary>
+        public object? ReturnValue { get; set; }
 
-        public static DispatchResult Ok() => new DispatchResult { Success = true };
+        public static DispatchResult Ok(object? returnValue = null) => new DispatchResult { Success = true, ReturnValue = returnValue };
         public static DispatchResult Fail(string message) => new DispatchResult { Success = false, ErrorMessage = message };
     }
 
@@ -144,7 +148,7 @@ namespace GameRL.Harmony.RPC
             try
             {
                 var args = BindParameters(actionInfo, parameters ?? new Dictionary<string, object>());
-                actionInfo.Method.Invoke(null, args);
+                var returnValue = actionInfo.Method.Invoke(null, args);
 
                 // Check if there was an error logged during parameter binding
                 if (_lastError != null)
@@ -152,7 +156,7 @@ namespace GameRL.Harmony.RPC
                     return DispatchResult.Fail(_lastError);
                 }
 
-                return DispatchResult.Ok();
+                return DispatchResult.Ok(returnValue);
             }
             catch (TargetInvocationException ex)
             {
@@ -199,19 +203,11 @@ namespace GameRL.Harmony.RPC
                         continue;
                     }
 
-                    // Required parameter is missing - check if we have a resolver for this type
-                    // This catches cases like Draft with TargetId instead of ColonistId
-                    if (_resolvers.ContainsKey(paramType))
-                    {
-                        var msg = $"Missing required parameter '{jsonKey}' ({paramType.Name}). Check the action's parameter names.";
-                        _logError($"[HarmonyRPC] {msg}");
-                        _lastError = msg;
-                        args[i] = null;
-                        continue;
-                    }
-
-                    // Use default for non-resolvable types
-                    args[i] = GetDefaultValue(paramType);
+                    // Required parameter is missing - report error
+                    var msg = $"Missing required parameter '{jsonKey}' for action '{actionInfo.Name}'. Check the action's parameter names.";
+                    _logError($"[HarmonyRPC] {msg}");
+                    _lastError = msg;
+                    args[i] = _resolvers.ContainsKey(paramType) ? null : GetDefaultValue(paramType);
                     continue;
                 }
 

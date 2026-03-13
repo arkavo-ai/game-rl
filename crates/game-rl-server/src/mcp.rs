@@ -168,9 +168,9 @@ impl Notification {
             jsonrpc: "2.0".to_string(),
             method: "notifications/game/stateUpdate".to_string(),
             params: Some(serde_json::json!({
-                "tick": tick,
-                "state": state,
-                "events": events
+                "Tick": tick,
+                "State": state,
+                "Events": events
             })),
         }
     }

@@ -21,6 +21,6 @@ pub use action::{Action, ActionSpace};
 pub use agent::{AgentConfig, AgentEntry, AgentId, AgentManifest, AgentStatus, AgentType};
 pub use error::{GameRLError, Result, error_codes};
 pub use manifest::{Capabilities, GameManifest};
-pub use observation::{GameEvent, Observation, StepResult};
+pub use observation::{EpisodeSummary, GameEvent, Observation, StepResult};
 pub use reward::{Reward, RewardComponents};
 pub use stream::{PixelFormat, StreamDescriptor, StreamProfile};

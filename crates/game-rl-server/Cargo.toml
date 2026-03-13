@@ -18,4 +18,14 @@ thiserror = { workspace = true }
 tracing = { workspace = true }
 async-trait = "0.1"
 
+# HTTP transport (optional)
+axum = { workspace = true, optional = true }
+tokio-stream = { workspace = true, optional = true }
+uuid = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+
+[features]
+default = []
+http = ["axum", "tokio-stream", "uuid", "tower-http"]
+
 [dev-dependencies]
