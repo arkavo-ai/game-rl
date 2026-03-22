@@ -307,14 +307,21 @@ async fn handle_register_agent<E: GameEnvironment>(
 ) -> Result<serde_json::Value> {
     let p: RegisterAgentParams = serde_json::from_value(params)?;
 
-    // Register in registry first
-    {
+    // Register in registry — returns false if already registered (idempotent)
+    let is_new = {
         let mut reg = registry.write().await;
         reg.register(p.agent_id.clone(), p.agent_type.clone())
-            .map_err(|e| GameRLError::ResourceExhausted(e.to_string()))?;
+            .map_err(|e| GameRLError::ResourceExhausted(e.to_string()))?
+    };
+
+    if !is_new {
+        return Ok(serde_json::json!({
+            "AgentId": p.agent_id,
+            "AlreadyRegistered": true
+        }));
     }
 
-    // Then register with environment
+    // Register with environment only for new agents
     let mut env = environment.write().await;
     let manifest = env
         .register_agent(p.agent_id.clone(), p.agent_type, p.config)

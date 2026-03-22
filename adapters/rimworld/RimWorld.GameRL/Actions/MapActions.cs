@@ -111,18 +111,21 @@ namespace RimWorld.GameRL.Actions
 
             // Get stuff (material) if specified
             ThingDef? stuffDef = null;
-            if (!string.IsNullOrEmpty(stuffDefName))
+            if (buildingDef.MadeFromStuff)
             {
-                stuffDef = DefDatabase<ThingDef>.GetNamed(stuffDefName, errorOnFail: false);
-                if (stuffDef == null)
+                if (!string.IsNullOrEmpty(stuffDefName))
                 {
-                    throw new InvalidOperationException($"Unknown stuff/material '{stuffDefName}'. Examples: WoodLog, BlocksSandstone, Steel");
+                    stuffDef = DefDatabase<ThingDef>.GetNamed(stuffDefName, errorOnFail: false);
+                    if (stuffDef == null)
+                    {
+                        throw new InvalidOperationException($"Unknown stuff/material '{stuffDefName}'. Examples: WoodLog, BlocksSandstone, Steel");
+                    }
                 }
-            }
-            else if (buildingDef.MadeFromStuff)
-            {
-                // Default to wood for stuff buildings
-                stuffDef = ThingDefOf.WoodLog;
+                else
+                {
+                    // Default to wood for stuff buildings
+                    stuffDef = ThingDefOf.WoodLog;
+                }
             }
 
             var pos = new IntVec3(x, 0, z);

@@ -590,8 +590,8 @@ namespace GameRL.Harmony
 
                 case EpisodeSummaryMessage m:
                     obj["TotalReward"] = m.TotalReward;
-                    obj["StepCount"] = (long)m.StepCount;
-                    obj["TicksElapsed"] = (long)m.TicksElapsed;
+                    obj["StepCount"] = m.StepCount;
+                    obj["TicksElapsed"] = m.TicksElapsed;
                     obj["RewardBreakdown"] = JToken.FromObject(m.RewardBreakdown ?? new Dictionary<string, double>());
                     if (m.TerminationReason != null)
                         obj["TerminationReason"] = m.TerminationReason;

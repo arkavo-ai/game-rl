@@ -18,12 +18,9 @@ namespace RimWorld.GameRL.Patches
     [HarmonyPatch(typeof(Dialog_FactionDuringLanding), nameof(Dialog_FactionDuringLanding.DoWindowContents))]
     public static class FactionNamingDialogPatch
     {
-        private static bool _dismissed;
-
         static void Postfix(Dialog_FactionDuringLanding __instance, Rect inRect)
         {
-            if (_dismissed) return;
-            _dismissed = true;
+            // Always auto-dismiss — no static flag so this works across saves/sessions
 
             Log.Message("[GameRL] Auto-dismissing faction naming dialog");
 
@@ -84,10 +81,6 @@ namespace RimWorld.GameRL.Patches
             }
         }
 
-        public static void Reset()
-        {
-            _dismissed = false;
-        }
     }
 
     /// <summary>
@@ -96,6 +89,50 @@ namespace RimWorld.GameRL.Patches
     /// </summary>
     public static class DialogDismissUtil
     {
+        private static int _framesSinceLastCheck;
+        private const int CheckIntervalFrames = 30; // ~0.5 seconds at 60fps
+
+        /// <summary>
+        /// List of dialog type names dismissed since last observation.
+        /// Cleared when read so the agent sees each dismissal exactly once.
+        /// </summary>
+        public static List<string> RecentlyDismissed { get; } = new List<string>();
+
+        /// <summary>
+        /// Called from OnUpdate every frame to auto-dismiss blocking dialogs.
+        /// Must run from OnUpdate (not OnTick) because modal dialogs block the tick loop.
+        /// </summary>
+        public static void FrameCheck()
+        {
+            _framesSinceLastCheck++;
+            if (_framesSinceLastCheck < CheckIntervalFrames) return;
+            _framesSinceLastCheck = 0;
+
+            DismissAllDialogs();
+        }
+
+        /// <summary>
+        /// Check if a window type is a blocking dialog that should be auto-dismissed.
+        /// </summary>
+        private static bool IsBlockingDialog(Window window)
+        {
+            if (window == null) return false;
+            var typeName = window.GetType().Name;
+
+            // Skip core UI windows that should never be closed
+            if (typeName.StartsWith("MainTabWindow") ||
+                typeName == "EditWindow_Log" ||
+                typeName == "UIRoot_Play" ||
+                typeName == "MapInterface")
+                return false;
+
+            // Close dialog-type windows that block gameplay
+            return typeName.StartsWith("Dialog_") ||
+                   typeName.Contains("MessageBox") ||
+                   typeName.Contains("ChooseResearch") ||
+                   window is Dialog_MessageBox;
+        }
+
         /// <summary>
         /// Close all blocking dialog windows currently open.
         /// Returns the number of dialogs closed.
@@ -112,33 +149,19 @@ namespace RimWorld.GameRL.Patches
 
                 foreach (var window in windows)
                 {
-                    // Skip the main game windows and toolbars
-                    if (window == null) continue;
+                    if (!IsBlockingDialog(window)) continue;
                     var typeName = window.GetType().Name;
 
-                    // Skip core UI windows that should never be closed
-                    if (typeName.StartsWith("MainTabWindow") ||
-                        typeName == "EditWindow_Log" ||
-                        typeName == "UIRoot_Play" ||
-                        typeName == "MapInterface")
-                        continue;
-
-                    // Close dialog-type windows that block gameplay
-                    if (typeName.StartsWith("Dialog_") ||
-                        typeName.Contains("MessageBox") ||
-                        typeName.Contains("ChooseResearch") ||
-                        window is Dialog_MessageBox)
+                    Log.Message($"[GameRL] Auto-dismissing dialog: {typeName}");
+                    try
                     {
-                        Log.Message($"[GameRL] Dismissing dialog: {typeName}");
-                        try
-                        {
-                            window.Close(true);
-                            dismissed++;
-                        }
-                        catch (Exception ex)
-                        {
-                            Log.Warning($"[GameRL] Failed to close {typeName}: {ex.Message}");
-                        }
+                        window.Close(true);
+                        dismissed++;
+                        RecentlyDismissed.Add(typeName);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Warning($"[GameRL] Failed to close {typeName}: {ex.Message}");
                     }
                 }
 
@@ -151,6 +174,7 @@ namespace RimWorld.GameRL.Patches
                     {
                         letterStack.RemoveLetter(letter);
                         dismissed++;
+                        RecentlyDismissed.Add($"Letter:{letter.Label}");
                     }
                 }
             }
@@ -160,6 +184,17 @@ namespace RimWorld.GameRL.Patches
             }
 
             return dismissed;
+        }
+
+        /// <summary>
+        /// Get and clear the list of recently dismissed dialogs (for observation).
+        /// </summary>
+        public static List<string> ConsumeRecentlyDismissed()
+        {
+            if (RecentlyDismissed.Count == 0) return new List<string>();
+            var result = new List<string>(RecentlyDismissed);
+            RecentlyDismissed.Clear();
+            return result;
         }
     }
 }

@@ -2,6 +2,7 @@
 
 using System;
 using System.IO;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using HarmonyLib;
@@ -419,7 +420,13 @@ namespace RimWorld.GameRL
         /// </summary>
         internal static void OnUpdate()
         {
+            (_bridge as RimWorldBridge)?.FlushLogs();
             _bridge?.ProcessCommands();
+
+            // Auto-dismiss blocking dialogs from OnUpdate (not OnTick!)
+            // Modal dialogs block the tick loop, so OnTick never fires while they're up.
+            // OnUpdate fires every frame regardless, so it can catch and close them.
+            Patches.DialogDismissUtil.FrameCheck();
         }
 
         /// <summary>
@@ -643,18 +650,36 @@ namespace RimWorld.GameRL
     }
 
     /// <summary>
-    /// RimWorld-specific bridge with proper logging
+    /// RimWorld-specific bridge that queues log messages for main-thread dispatch.
+    /// Verse.Log is not thread-safe — calling it from background threads causes
+    /// "Collection was modified" exceptions in the log window.
     /// </summary>
     internal class RimWorldBridge : Bridge
     {
+        private readonly ConcurrentQueue<(string message, bool isError)> _logQueue = new();
+
         protected override void Log(string message)
         {
-            Verse.Log.Message($"[GameRL] {message}");
+            _logQueue.Enqueue(($"[GameRL] {message}", false));
         }
 
         protected override void LogError(string message)
         {
-            Verse.Log.Error($"[GameRL] {message}");
+            _logQueue.Enqueue(($"[GameRL] {message}", true));
+        }
+
+        /// <summary>
+        /// Flush queued log messages. Must be called from the main thread.
+        /// </summary>
+        public void FlushLogs()
+        {
+            while (_logQueue.TryDequeue(out var entry))
+            {
+                if (entry.isError)
+                    Verse.Log.Error(entry.message);
+                else
+                    Verse.Log.Message(entry.message);
+            }
         }
     }
 }

@@ -115,6 +115,14 @@ namespace RimWorld.GameRL.Actions
             if (!Current.Game.playSettings.useWorkPriorities)
             {
                 Current.Game.playSettings.useWorkPriorities = true;
+                // Notify all pawns so their work settings reflect the manual priority mode
+                foreach (var p in PawnsFinder.AllMapsWorldAndTemporary_Alive)
+                {
+                    if (p.workSettings != null)
+                    {
+                        p.workSettings.Notify_UseWorkPrioritiesChanged();
+                    }
+                }
                 Log.Message("[GameRL] Enabled manual work priorities");
             }
 

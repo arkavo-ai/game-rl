@@ -152,9 +152,6 @@ namespace RimWorld.GameRL.Actions
             // Signal that a game teardown is about to happen
             LoadRequested = true;
 
-            // Reset the dialog dismiss flag so the naming dialog gets auto-closed
-            Patches.FactionNamingDialogPatch.Reset();
-
             // Queue long event so the game teardown/rebuild happens safely
             LongEventHandler.QueueLongEvent(delegate
             {

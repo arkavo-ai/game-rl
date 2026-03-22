@@ -299,7 +299,7 @@ namespace RimWorld.GameRL.Actions
                 return (true, false, "colony_destroyed");
 
             // Check episode length
-            var ticksElapsed = (Find.TickManager?.TicksGame ?? 0) - _episodeStartTick;
+            var ticksElapsed = Math.Max(0, (Find.TickManager?.TicksGame ?? 0) - _episodeStartTick);
             if (ticksElapsed >= MaxEpisodeTicks)
                 return (false, true, "timeout");
 
@@ -367,7 +367,7 @@ namespace RimWorld.GameRL.Actions
         /// </summary>
         public EpisodeSummaryData GetEpisodeSummary()
         {
-            var ticksElapsed = (ulong)((Find.TickManager?.TicksGame ?? 0) - _episodeStartTick);
+            var ticksElapsed = (ulong)Math.Max(0, (Find.TickManager?.TicksGame ?? 0) - _episodeStartTick);
             return new EpisodeSummaryData
             {
                 TotalReward = _cumulativeTotalReward,
