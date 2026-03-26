@@ -79,6 +79,15 @@ pub trait GameEnvironment: Send + Sync {
 - **MCP Layer**: JSON-RPC 2.0 over stdio (agents ↔ game-rl-server)
 - **IPC Layer**: JSON over Unix sockets (game-rl-server ↔ .NET games)
 
+## MCP Compliance
+
+This project is an MCP server. Models and agents are trained on the MCP standard — do not deviate from it.
+
+- **Tool schemas** must use standard JSON Schema conventions (`type`, `description`, `properties` — lowercase per JSON Schema spec)
+- **Tool responses** (game data payloads) use PascalCase for all field names, matching C#/.NET conventions
+- Do not invent custom schema formats — use MCP's `tools/list` with proper JSON Schema `inputSchema` definitions
+- The MCP spec is the source of truth for protocol-level naming and structure
+
 ## Constraints
 
 - No Ruby code (user preference)

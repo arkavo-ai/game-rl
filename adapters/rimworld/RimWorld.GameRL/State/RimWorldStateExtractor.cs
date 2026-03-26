@@ -2195,75 +2195,75 @@ namespace RimWorld.GameRL.State
         {
             return new Dictionary<string, object>
             {
-                ["format"] = "Action is a flat JSON object with \"Type\" as the action name and all parameters as top-level keys. Example: {\"Type\": \"Draft\", \"ColonistId\": \"Human123\"} or {\"Type\": \"SetWorkPriority\", \"ColonistId\": \"Lizzie\", \"WorkType\": \"Construction\", \"Priority\": 1}",
-                ["actions"] = new object[]
+                ["Format"] = "Action is a flat JSON object with \"Type\" as the action name and all parameters as top-level keys. Example: {\"Type\": \"Draft\", \"ColonistId\": \"Human123\"} or {\"Type\": \"SetWorkPriority\", \"ColonistId\": \"Lizzie\", \"WorkType\": \"Construction\", \"Priority\": 1}",
+                ["Actions"] = new object[]
                 {
                     // Basic actions
-                    new { Type = "Draft", description = "Draft a colonist for direct control", ColonistId = "entity_id" },
-                    new { Type = "Undraft", description = "Undraft a colonist", ColonistId = "entity_id" },
-                    new { Type = "Move", description = "Move a drafted pawn to coordinates", ColonistId = "entity_id", X = "int", Y = "int" },
-                    new { Type = "MoveToEntity", description = "Move toward a target entity", ColonistId = "entity_id", TargetId = "entity_id" },
+                    new { Type = "Draft", Description = "Draft a colonist for direct control", ColonistId = "EntityId" },
+                    new { Type = "Undraft", Description = "Undraft a colonist", ColonistId = "EntityId" },
+                    new { Type = "Move", Description = "Move a drafted pawn to coordinates", ColonistId = "EntityId", X = "int", Y = "int" },
+                    new { Type = "MoveToEntity", Description = "Move toward a target entity", ColonistId = "EntityId", TargetId = "EntityId" },
 
                     // Work management
-                    new { Type = "SetWorkPriority", description = "Set work priority (0=disabled, 1=highest, 4=lowest)", ColonistId = "entity_id", WorkType = "string", Priority = "int 0-4" },
-                    new { Type = "SetMedicalCare", description = "Set medical care level (nocare/nomeds/herbal/normal/best)", ColonistId = "entity_id", CareLevel = "string" },
+                    new { Type = "SetWorkPriority", Description = "Set work priority (0=disabled, 1=highest, 4=lowest)", ColonistId = "EntityId", WorkType = "string", Priority = "int 0-4" },
+                    new { Type = "SetMedicalCare", Description = "Set medical care level (nocare/nomeds/herbal/normal/best)", ColonistId = "EntityId", CareLevel = "string" },
 
                     // Combat
-                    new { Type = "Attack", description = "Force a drafted pawn to attack", ColonistId = "entity_id", TargetId = "entity_id" },
-                    new { Type = "DesignateHunt", description = "Mark an animal for hunting", TargetId = "entity_id" },
-                    new { Type = "CancelHunt", description = "Remove hunting designation", TargetId = "entity_id" },
+                    new { Type = "Attack", Description = "Force a drafted pawn to attack", ColonistId = "EntityId", TargetId = "EntityId" },
+                    new { Type = "DesignateHunt", Description = "Mark an animal for hunting", TargetId = "EntityId" },
+                    new { Type = "CancelHunt", Description = "Remove hunting designation", TargetId = "EntityId" },
 
                     // Items
-                    new { Type = "Equip", description = "Have a pawn equip a weapon", ColonistId = "entity_id", WeaponId = "entity_id" },
-                    new { Type = "Haul", description = "Force a pawn to haul an item", ColonistId = "entity_id", ItemId = "entity_id" },
-                    new { Type = "Unforbid", description = "Unforbid a specific item", ThingId = "entity_id" },
-                    new { Type = "UnforbidByType", description = "Unforbid all items of a type (e.g., MealSurvivalPack)", DefName = "string" },
-                    new { Type = "UnforbidArea", description = "Unforbid all items in a radius", X = "int", Y = "int", Radius = "int" },
+                    new { Type = "Equip", Description = "Have a pawn equip a weapon", ColonistId = "EntityId", WeaponId = "EntityId" },
+                    new { Type = "Haul", Description = "Force a pawn to haul an item", ColonistId = "EntityId", ItemId = "EntityId" },
+                    new { Type = "Unforbid", Description = "Unforbid a specific item", ThingId = "EntityId" },
+                    new { Type = "UnforbidByType", Description = "Unforbid all items of a type (e.g., MealSurvivalPack)", DefName = "string" },
+                    new { Type = "UnforbidArea", Description = "Unforbid all items in a radius", X = "int", Y = "int", Radius = "int" },
 
                     // Production
-                    new { Type = "AddBill", description = "Add a production bill to a workbench", BuildingId = "entity_id", Recipe = "string", Count = "int" },
-                    new { Type = "CancelBill", description = "Remove a bill from a workbench", BuildingId = "entity_id", BillIndex = "int" },
-                    new { Type = "ModifyBill", description = "Modify a bill's count or repeat mode", BuildingId = "entity_id", BillIndex = "int", Count = "int (optional)", RepeatForever = "bool (optional)" },
+                    new { Type = "AddBill", Description = "Add a production bill to a workbench", BuildingId = "EntityId", Recipe = "string", Count = "int" },
+                    new { Type = "CancelBill", Description = "Remove a bill from a workbench", BuildingId = "EntityId", BillIndex = "int" },
+                    new { Type = "ModifyBill", Description = "Modify a bill's count or repeat mode", BuildingId = "EntityId", BillIndex = "int", Count = "int (optional)", RepeatForever = "bool (optional)" },
 
                     // Construction & Zones
-                    new { Type = "PlaceBlueprint", description = "Place a building blueprint", Building = "string", X = "int", Y = "int", Rotation = "int (optional)", Stuff = "string (optional)" },
-                    new { Type = "CreateStockpile", description = "Create a stockpile zone", X = "int", Y = "int", Width = "int", Height = "int" },
-                    new { Type = "CreateGrowingZone", description = "Create a growing zone", X = "int", Y = "int", Width = "int", Height = "int", Plant = "string (optional)" },
-                    new { Type = "DesignateMine", description = "Designate area for mining", X = "int", Y = "int", Radius = "int" },
-                    new { Type = "DesignateCutPlants", description = "Designate plants for cutting", X = "int", Y = "int", Radius = "int" },
+                    new { Type = "PlaceBlueprint", Description = "Place a building blueprint", Building = "string", X = "int", Y = "int", Rotation = "int (optional)", Stuff = "string (optional)" },
+                    new { Type = "CreateStockpile", Description = "Create a stockpile zone", X = "int", Y = "int", Width = "int", Height = "int" },
+                    new { Type = "CreateGrowingZone", Description = "Create a growing zone", X = "int", Y = "int", Width = "int", Height = "int", Plant = "string (optional)" },
+                    new { Type = "DesignateMine", Description = "Designate area for mining", X = "int", Y = "int", Radius = "int" },
+                    new { Type = "DesignateCutPlants", Description = "Designate plants for cutting", X = "int", Y = "int", Radius = "int" },
 
                     // Social
-                    new { Type = "Chat", description = "Initiate social interaction", ColonistId = "entity_id", TargetId = "entity_id" },
+                    new { Type = "Chat", Description = "Initiate social interaction", ColonistId = "EntityId", TargetId = "EntityId" },
 
                     // Game control
-                    new { Type = "SetSpeed", description = "Set game speed (0=paused, 1=normal, 2=fast, 3=superfast)", Speed = "int 0-3" },
-                    new { Type = "Unpause", description = "Resume the game at normal speed" },
+                    new { Type = "SetSpeed", Description = "Set game speed (0=paused, 1=normal, 2=fast, 3=superfast)", Speed = "int 0-3" },
+                    new { Type = "Unpause", Description = "Resume the game at normal speed" },
 
                     // Research
-                    new { Type = "SelectResearch", description = "Select a research project to work on", ProjectDefName = "string" },
+                    new { Type = "SelectResearch", Description = "Select a research project to work on", ProjectDefName = "string" },
 
                     // Zone management
-                    new { Type = "DeleteZone", description = "Delete a zone by label", ZoneLabel = "string" },
-                    new { Type = "SetStockpilePriority", description = "Set stockpile priority (1-5)", ZoneLabel = "string", Priority = "int 1-5" },
-                    new { Type = "SetGrowingPlant", description = "Change growing zone plant type", ZoneLabel = "string", PlantDefName = "string" },
+                    new { Type = "DeleteZone", Description = "Delete a zone by label", ZoneLabel = "string" },
+                    new { Type = "SetStockpilePriority", Description = "Set stockpile priority (1-5)", ZoneLabel = "string", Priority = "int 1-5" },
+                    new { Type = "SetGrowingPlant", Description = "Change growing zone plant type", ZoneLabel = "string", PlantDefName = "string" },
 
                     // Prisoner management
-                    new { Type = "SetPrisonerInteraction", description = "Set prisoner interaction mode", PrisonerId = "entity_id", Mode = "string" },
+                    new { Type = "SetPrisonerInteraction", Description = "Set prisoner interaction mode", PrisonerId = "EntityId", Mode = "string" },
 
                     // Medical
-                    new { Type = "Rescue", description = "Rescue a downed pawn to a bed", ColonistId = "entity_id", TargetId = "entity_id" },
-                    new { Type = "TendTo", description = "Have a doctor tend to an injured/sick pawn", ColonistId = "entity_id", TargetId = "entity_id" },
+                    new { Type = "Rescue", Description = "Rescue a downed pawn to a bed", ColonistId = "EntityId", TargetId = "EntityId" },
+                    new { Type = "TendTo", Description = "Have a doctor tend to an injured/sick pawn", ColonistId = "EntityId", TargetId = "EntityId" },
 
                     // Animals
-                    new { Type = "DesignateTame", description = "Mark a wild animal for taming", TargetId = "entity_id" },
-                    new { Type = "SetAnimalTraining", description = "Toggle training for a tamed animal (Obedience, Release, Rescue, Haul)", AnimalId = "entity_id", TrainingDef = "string", Enabled = "bool" },
-                    new { Type = "SetAnimalArea", description = "Restrict animal to an area (or 'Unrestricted')", AnimalId = "entity_id", AreaLabel = "string" },
-                    new { Type = "DesignateSlaughter", description = "Mark a tamed animal for slaughter", AnimalId = "entity_id" },
+                    new { Type = "DesignateTame", Description = "Mark a wild animal for taming", TargetId = "EntityId" },
+                    new { Type = "SetAnimalTraining", Description = "Toggle training for a tamed animal (Obedience, Release, Rescue, Haul)", AnimalId = "EntityId", TrainingDef = "string", Enabled = "bool" },
+                    new { Type = "SetAnimalArea", Description = "Restrict animal to an area (or 'Unrestricted')", AnimalId = "EntityId", AreaLabel = "string" },
+                    new { Type = "DesignateSlaughter", Description = "Mark a tamed animal for slaughter", AnimalId = "EntityId" },
 
                     // Episode management
-                    new { Type = "SaveCheckpoint", description = "Save game state for episode reset", Name = "string" },
-                    new { Type = "LoadCheckpoint", description = "Load a saved game checkpoint", Name = "string" },
-                    new { Type = "DismissLetters", description = "Dismiss all pending letter notifications" }
+                    new { Type = "SaveCheckpoint", Description = "Save game state for episode reset", Name = "string" },
+                    new { Type = "LoadCheckpoint", Description = "Load a saved game checkpoint", Name = "string" },
+                    new { Type = "DismissLetters", Description = "Dismiss all pending letter notifications" }
                 }
             };
         }
@@ -2272,11 +2272,11 @@ namespace RimWorld.GameRL.State
         {
             return new Dictionary<string, object>
             {
-                ["format"] = "Action is a flat JSON object with \"Type\" as the action name and all parameters as top-level keys. Example: {\"Type\": \"Move\", \"X\": 50, \"Y\": 30}",
-                ["actions"] = new object[]
+                ["Format"] = "Action is a flat JSON object with \"Type\" as the action name and all parameters as top-level keys. Example: {\"Type\": \"Move\", \"X\": 50, \"Y\": 30}",
+                ["Actions"] = new object[]
                 {
-                    new { Type = "Move", description = "Move to coordinates", X = "int", Y = "int" },
-                    new { Type = "Interact", description = "Interact with a target", TargetId = "entity_id" }
+                    new { Type = "Move", Description = "Move to coordinates", X = "int", Y = "int" },
+                    new { Type = "Interact", Description = "Interact with a target", TargetId = "EntityId" }
                 }
             };
         }

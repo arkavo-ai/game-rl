@@ -132,7 +132,7 @@ namespace RimWorld.GameRL.Rewards
             // TIME COST: Small per-step penalty to discourage passivity
             // ~15000 steps per episode → total ~-150 if agent does nothing
             // ═══════════════════════════════════════════════════════════════
-            components["time"] = -0.01;
+            components["Time"] = -0.01;
 
             // ═══════════════════════════════════════════════════════════════
             // CRITICAL: Colonist survival
@@ -142,11 +142,11 @@ namespace RimWorld.GameRL.Rewards
             var colonistDelta = colonistCount - _lastColonistCount;
             if (colonistDelta < 0)
             {
-                components["colonist_death"] = colonistDelta * 10.0;
+                components["ColonistDeath"] = colonistDelta * 10.0;
             }
             else if (colonistDelta > 0)
             {
-                components["colonist_recruited"] = colonistDelta * 5.0;
+                components["ColonistRecruited"] = colonistDelta * 5.0;
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -158,14 +158,14 @@ namespace RimWorld.GameRL.Rewards
                 var moodAvg = colonists.Average(p => p.needs?.mood?.CurLevelPercentage ?? 0.5f);
                 var moodDelta = moodAvg - _lastAvgMood;
                 if (System.Math.Abs(moodDelta) > 0.01f)
-                    components["mood"] = System.Math.Clamp(moodDelta * 3.0, -0.3, 0.3);
+                    components["Mood"] = System.Math.Clamp(moodDelta * 3.0, -0.3, 0.3);
                 _lastAvgMood = moodAvg;
 
                 // Hunger: reward feeding (hunger decrease), penalize starvation increase
                 var avgHunger = colonists.Average(p => 1.0f - (p.needs?.food?.CurLevelPercentage ?? 1f));
                 var hungerDelta = avgHunger - _lastAvgHunger;
                 if (System.Math.Abs(hungerDelta) > 0.01f)
-                    components["hunger"] = System.Math.Clamp(-hungerDelta * 3.0, -0.5, 0.5);
+                    components["Hunger"] = System.Math.Clamp(-hungerDelta * 3.0, -0.5, 0.5);
                 _lastAvgHunger = avgHunger;
 
                 // Exhaustion: reward rest recovery, penalize new exhaustion
@@ -174,21 +174,21 @@ namespace RimWorld.GameRL.Rewards
                     && p.CurJob?.def != JobDefOf.LayDown);
                 var exhaustedDelta = exhaustedCount - _lastExhaustedCount;
                 if (exhaustedDelta != 0)
-                    components["exhaustion"] = System.Math.Clamp(-exhaustedDelta * 0.15, -0.3, 0.3);
+                    components["Exhaustion"] = System.Math.Clamp(-exhaustedDelta * 0.15, -0.3, 0.3);
                 _lastExhaustedCount = exhaustedCount;
 
                 // Health: reward healing, penalize injury
                 var avgHealth = colonists.Average(p => p.health?.summaryHealth?.SummaryHealthPercent ?? 1f);
                 var healthDelta = avgHealth - _lastAvgHealth;
                 if (System.Math.Abs(healthDelta) > 0.01f)
-                    components["health"] = System.Math.Clamp(healthDelta * 5.0, -0.5, 0.5);
+                    components["Health"] = System.Math.Clamp(healthDelta * 5.0, -0.5, 0.5);
                 _lastAvgHealth = avgHealth;
 
                 // Mental break: reward recovery, penalize new breaks
                 var mentalCount = colonists.Count(p => p.InMentalState);
                 var mentalDelta = mentalCount - _lastMentalCount;
                 if (mentalDelta != 0)
-                    components["mental_break"] = System.Math.Clamp(-mentalDelta * 0.3, -0.6, 0.3);
+                    components["MentalBreak"] = System.Math.Clamp(-mentalDelta * 0.3, -0.6, 0.3);
                 _lastMentalCount = mentalCount;
             }
 
@@ -204,7 +204,7 @@ namespace RimWorld.GameRL.Rewards
                 var idleFraction = (float)idleCount / colonistCount;
                 if (idleFraction > 0.33f)
                 {
-                    components["idle"] = -(idleFraction - 0.33) * 0.3;
+                    components["Idle"] = -(idleFraction - 0.33) * 0.3;
                 }
             }
 
@@ -213,7 +213,7 @@ namespace RimWorld.GameRL.Rewards
             var wealthReward = System.Math.Clamp(wealthDelta / 5000.0, -0.3, 0.3);
             if (System.Math.Abs(wealthReward) > 0.001)
             {
-                components["wealth"] = wealthReward;
+                components["Wealth"] = wealthReward;
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -223,7 +223,7 @@ namespace RimWorld.GameRL.Rewards
             var foodDelta = foodDays - _lastFoodDays;
             if (foodDelta != 0)
             {
-                components["food_security"] = System.Math.Clamp(foodDelta * 0.05, -0.3, 0.3);
+                components["FoodSecurity"] = System.Math.Clamp(foodDelta * 0.05, -0.3, 0.3);
             }
 
             // Penalty for no food production infrastructure
@@ -240,7 +240,7 @@ namespace RimWorld.GameRL.Rewards
 
                     if (!hasGrowingZone && !hasHuntDesignation && !hasCookBill)
                     {
-                        components["no_food_production"] = -0.10;
+                        components["NoFoodProduction"] = -0.10;
                     }
                 }
                 catch { }
@@ -253,31 +253,31 @@ namespace RimWorld.GameRL.Rewards
             var hostileDelta = hostileCount - _lastHostileCount;
             if (hostileDelta < 0)
             {
-                components["threat_eliminated"] = System.Math.Min(-hostileDelta * 0.3, 1.0);
+                components["ThreatEliminated"] = System.Math.Min(-hostileDelta * 0.3, 1.0);
             }
             else if (hostileDelta > 0)
             {
                 // Small penalty — raids aren't the agent's fault
-                components["threat_appeared"] = System.Math.Max(-hostileDelta * 0.05, -0.3);
+                components["ThreatAppeared"] = System.Math.Max(-hostileDelta * 0.05, -0.3);
             }
 
             // Fire: continuous penalty, bonus for putting out
             var fireCount = CountFires(map);
             if (fireCount > 0)
             {
-                components["fire_active"] = -System.Math.Min(fireCount * 0.05, 0.50);
+                components["FireActive"] = -System.Math.Min(fireCount * 0.05, 0.50);
             }
             var fireDelta = fireCount - _lastFireCount;
             if (fireDelta < 0 && _lastFireCount > 0)
             {
-                components["fire_extinguished"] = System.Math.Min(-fireDelta * 0.05, 0.3);
+                components["FireExtinguished"] = System.Math.Min(-fireDelta * 0.05, 0.3);
             }
 
             // Game conditions (toxic fallout, solar flare, etc.)
             var conditionCount = CountActiveConditions(map);
             if (conditionCount > _lastConditionCount)
             {
-                components["condition_started"] = -(conditionCount - _lastConditionCount) * 0.1;
+                components["ConditionStarted"] = -(conditionCount - _lastConditionCount) * 0.1;
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -302,22 +302,22 @@ namespace RimWorld.GameRL.Rewards
             var silverDelta = silverCount - _lastSilverCount;
 
             if (woodDelta > 0)
-                components["wood_gathered"] = System.Math.Min(woodDelta * 0.001, 0.1);
+                components["WoodGathered"] = System.Math.Min(woodDelta * 0.001, 0.1);
             if (steelDelta > 0)
-                components["steel_gathered"] = System.Math.Min(steelDelta * 0.002, 0.1);
+                components["SteelGathered"] = System.Math.Min(steelDelta * 0.002, 0.1);
             if (componentDelta > 0)
-                components["components_gained"] = System.Math.Min(componentDelta * 0.01, 0.2);
+                components["ComponentsGained"] = System.Math.Min(componentDelta * 0.01, 0.2);
             if (stoneDelta > 0)
-                components["stone_mined"] = System.Math.Min(stoneDelta * 0.001, 0.1);
+                components["StoneMined"] = System.Math.Min(stoneDelta * 0.001, 0.1);
             if (silverDelta > 0)
-                components["silver_gained"] = System.Math.Min(silverDelta * 0.0005, 0.1);
+                components["SilverGained"] = System.Math.Min(silverDelta * 0.0005, 0.1);
 
             // ═══════════════════════════════════════════════════════════════
             // TRADERS: Full opportunity cost logic (silverDelta now available)
             // ═══════════════════════════════════════════════════════════════
             if (traderCount > _lastTraderCount)
             {
-                components["trader_arrived"] = (traderCount - _lastTraderCount) * 0.15;
+                components["TraderArrived"] = (traderCount - _lastTraderCount) * 0.15;
                 _traderPresentTicks = 0;
             }
 
@@ -325,14 +325,14 @@ namespace RimWorld.GameRL.Rewards
             {
                 _traderPresentTicks++;
                 // Escalating urgency while trader is present
-                components["trader_opportunity"] = -System.Math.Min(_traderPresentTicks * 0.02, 0.10);
+                components["TraderOpportunity"] = -System.Math.Min(_traderPresentTicks * 0.02, 0.10);
             }
             else if (_lastTraderCount > 0 && traderCount == 0)
             {
                 // Trader just left — penalize if no trade occurred (silver unchanged)
                 if (silverDelta == 0)
                 {
-                    components["trader_missed"] = -0.50;
+                    components["TraderMissed"] = -0.50;
                 }
                 _traderPresentTicks = 0;
             }
@@ -344,12 +344,12 @@ namespace RimWorld.GameRL.Rewards
             var tamedDelta = tamedCount - _lastTamedAnimalCount;
             if (tamedDelta > 0)
             {
-                components["animal_tamed"] = System.Math.Min(tamedDelta * 0.2, 0.5);
+                components["AnimalTamed"] = System.Math.Min(tamedDelta * 0.2, 0.5);
             }
             else if (tamedDelta < 0)
             {
                 // Animal died or was sold — mild signal, not always bad
-                components["animal_lost"] = System.Math.Max(tamedDelta * 0.05, -0.2);
+                components["AnimalLost"] = System.Math.Max(tamedDelta * 0.05, -0.2);
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -362,11 +362,11 @@ namespace RimWorld.GameRL.Rewards
                 var progressDelta = currentProgress - _lastResearchProgress;
                 if (progressDelta > 0)
                 {
-                    components["research"] = System.Math.Min(progressDelta * 1.0, 0.5);
+                    components["Research"] = System.Math.Min(progressDelta * 1.0, 0.5);
                 }
                 if (currentProgress >= 1.0f && _lastResearchProgress < 1.0f)
                 {
-                    components["research_complete"] = 2.0;
+                    components["ResearchComplete"] = 2.0;
                 }
             }
             else
@@ -383,12 +383,12 @@ namespace RimWorld.GameRL.Rewards
                         if (hasResearchBench)
                         {
                             // Bench exists but no project — clear missed opportunity
-                            components["no_research"] = -0.08;
+                            components["NoResearch"] = -0.08;
                         }
                         else
                         {
                             // No bench yet — gentle nudge to build one
-                            components["no_research"] = -0.03;
+                            components["NoResearch"] = -0.03;
                         }
                     }
                 }
@@ -403,7 +403,7 @@ namespace RimWorld.GameRL.Rewards
             var buildingDelta = buildingCount - _lastBuildingCount;
             if (buildingDelta > 0)
             {
-                components["construction"] = System.Math.Min(buildingDelta * 0.05, 0.3);
+                components["Construction"] = System.Math.Min(buildingDelta * 0.05, 0.3);
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -413,7 +413,7 @@ namespace RimWorld.GameRL.Rewards
             if (blueprintCount > 3)
             {
                 // Escalating: 4 = -0.02, 10 = -0.14, 18+ capped at -0.3
-                components["blueprint_backlog"] = -System.Math.Min((blueprintCount - 3) * 0.02, 0.3);
+                components["BlueprintBacklog"] = -System.Math.Min((blueprintCount - 3) * 0.02, 0.3);
             }
             _lastBlueprintCount = blueprintCount;
 
@@ -431,12 +431,12 @@ namespace RimWorld.GameRL.Rewards
                 if (hasPowerConsumers && generatorCount == 0)
                 {
                     // Have things that NEED power but no generators
-                    components["no_power"] = -0.12;
+                    components["NoPower"] = -0.12;
                 }
                 else if (generatorCount == 0 && buildingCount > 5)
                 {
                     // Colony is growing but hasn't built power yet
-                    components["no_power"] = -0.04;
+                    components["NoPower"] = -0.04;
                 }
             }
             catch { }
@@ -455,7 +455,7 @@ namespace RimWorld.GameRL.Rewards
                 }
                 if (System.Math.Abs(goodwillDelta) > 0)
                 {
-                    components["faction_goodwill"] = System.Math.Clamp(goodwillDelta * 0.005, -0.3, 0.3);
+                    components["FactionGoodwill"] = System.Math.Clamp(goodwillDelta * 0.005, -0.3, 0.3);
                 }
                 _lastFactionGoodwill = currentGoodwill;
             }
@@ -475,7 +475,7 @@ namespace RimWorld.GameRL.Rewards
                 }
                 if (xpGain > 0)
                 {
-                    components["skill_progression"] = System.Math.Min(xpGain * 0.0001, 0.2);
+                    components["SkillProgression"] = System.Math.Min(xpGain * 0.0001, 0.2);
                 }
                 _lastSkillXP = currentXP;
             }
@@ -487,7 +487,7 @@ namespace RimWorld.GameRL.Rewards
             if (silverDelta != 0 && traderCount > 0)
             {
                 if (silverDelta > 0)
-                    components["trade_profit"] = System.Math.Min(silverDelta * 0.001, 0.2);
+                    components["TradeProfit"] = System.Math.Min(silverDelta * 0.001, 0.2);
             }
 
             // ═══════════════════════════════════════════════════════════════
@@ -499,7 +499,7 @@ namespace RimWorld.GameRL.Rewards
                 var prisonerDelta = prisonerCount - _lastPrisonerCount;
                 if (prisonerDelta < 0 && colonistDelta > 0)
                 {
-                    components["prisoner_recruited"] = System.Math.Min(-prisonerDelta * 1.0, 3.0);
+                    components["PrisonerRecruited"] = System.Math.Min(-prisonerDelta * 1.0, 3.0);
                 }
                 _lastPrisonerCount = prisonerCount;
             }
@@ -514,7 +514,7 @@ namespace RimWorld.GameRL.Rewards
                 var defenseDelta = defenseCount - _lastDefensiveCount;
                 if (defenseDelta > 0)
                 {
-                    components["defensive_structures"] = System.Math.Min(defenseDelta * 0.05, 0.3);
+                    components["DefensiveStructures"] = System.Math.Min(defenseDelta * 0.05, 0.3);
                 }
                 _lastDefensiveCount = defenseCount;
             }
@@ -539,7 +539,7 @@ namespace RimWorld.GameRL.Rewards
                     var comfortRatio = (float)comfortableCount / colonistCount;
                     var tempDelta = comfortRatio - _lastTemperatureComfortRatio;
                     if (System.Math.Abs(tempDelta) > 0.01f)
-                        components["temperature_comfort"] = System.Math.Clamp(tempDelta * 1.0, -0.2, 0.2);
+                        components["TemperatureComfort"] = System.Math.Clamp(tempDelta * 1.0, -0.2, 0.2);
                     _lastTemperatureComfortRatio = comfortRatio;
                 }
                 catch { }
@@ -554,7 +554,7 @@ namespace RimWorld.GameRL.Rewards
                 var impressDelta = avgImpressiveness - _lastAvgRoomImpressiveness;
                 if (impressDelta > 0.5f)
                 {
-                    components["room_quality"] = System.Math.Min(impressDelta * 0.02, 0.2);
+                    components["RoomQuality"] = System.Math.Min(impressDelta * 0.02, 0.2);
                 }
                 _lastAvgRoomImpressiveness = avgImpressiveness;
             }
@@ -575,7 +575,7 @@ namespace RimWorld.GameRL.Rewards
                     }
                     else
                     {
-                        components["action_success"] = 0.10;
+                        components["ActionSuccess"] = 0.10;
                     }
                 }
                 else if (!_lastActionResult.Success)
@@ -593,7 +593,7 @@ namespace RimWorld.GameRL.Rewards
                         ActionErrorCode.InternalError => -0.02,
                         _ => -0.02
                     };
-                    components["invalid_action"] = penalty;
+                    components["InvalidAction"] = penalty;
                 }
             }
             _lastActionResult = null;

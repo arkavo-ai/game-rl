@@ -1,7 +1,7 @@
 //! MCP tool handlers for Game-RL protocol
 
 use game_rl_core::{
-    Action, ActionSpace, AgentConfig, AgentId, AgentType, GameRLError, Result, error_codes,
+    Action, ActionSpace, AgentConfig, AgentId, AgentType, GameRLError, Result,
 };
 use serde::{Deserialize, Serialize};
 
@@ -11,6 +11,24 @@ use crate::registry::AgentRegistry;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
+/// MCP tool annotations — hints about tool behavior for clients
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ToolAnnotations {
+    /// If true, the tool does not modify game state
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_only_hint: Option<bool>,
+    /// If true, the tool may perform destructive operations
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub destructive_hint: Option<bool>,
+    /// If true, calling repeatedly with same args has no additional effect
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub idempotent_hint: Option<bool>,
+    /// If true, the tool interacts with the external game world
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub open_world_hint: Option<bool>,
+}
+
 /// Tool definition for MCP tools/list
 #[derive(Debug, Clone, Serialize)]
 pub struct ToolDef {
@@ -18,10 +36,31 @@ pub struct ToolDef {
     pub description: String,
     #[serde(rename = "inputSchema")]
     pub input_schema: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub annotations: Option<ToolAnnotations>,
 }
 
 /// Get list of available tools
 pub fn list_tools() -> Vec<ToolDef> {
+    let read_only = Some(ToolAnnotations {
+        read_only_hint: Some(true),
+        destructive_hint: None,
+        idempotent_hint: Some(true),
+        open_world_hint: Some(true),
+    });
+    let mutating = Some(ToolAnnotations {
+        read_only_hint: Some(false),
+        destructive_hint: Some(false),
+        idempotent_hint: Some(false),
+        open_world_hint: Some(true),
+    });
+    let destructive = Some(ToolAnnotations {
+        read_only_hint: Some(false),
+        destructive_hint: Some(true),
+        idempotent_hint: Some(false),
+        open_world_hint: Some(true),
+    });
+
     vec![
         ToolDef {
             name: "registerAgent".into(),
@@ -46,6 +85,12 @@ pub fn list_tools() -> Vec<ToolDef> {
                 },
                 "required": ["AgentId", "AgentType"]
             }),
+            annotations: Some(ToolAnnotations {
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(true),
+            }),
         },
         ToolDef {
             name: "deregisterAgent".into(),
@@ -60,6 +105,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                 },
                 "required": ["AgentId"]
             }),
+            annotations: destructive.clone(),
         },
         ToolDef {
             name: "step".into(),
@@ -102,6 +148,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "required": ["AgentId", "Action"],
                 "additionalProperties": false
             }),
+            annotations: mutating.clone(),
         },
         ToolDef {
             name: "reset".into(),
@@ -136,6 +183,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                     }
                 }
             }),
+            annotations: destructive.clone(),
         },
         ToolDef {
             name: "observe".into(),
@@ -174,22 +222,25 @@ pub fn list_tools() -> Vec<ToolDef> {
                     }
                 }
             }),
+            annotations: read_only.clone(),
         },
         ToolDef {
             name: "stateHash".into(),
             description: "Get hash of current game state for debugging".into(),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {}
+                "additionalProperties": false
             }),
+            annotations: read_only.clone(),
         },
         ToolDef {
             name: "episodeSummary".into(),
             description: "Get cumulative episode metrics (total reward, step count, ticks elapsed, reward breakdown). Call after done=true to assess episode quality before reset.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
-                "properties": {}
+                "additionalProperties": false
             }),
+            annotations: read_only.clone(),
         },
         ToolDef {
             name: "configureStreams".into(),
@@ -207,6 +258,12 @@ pub fn list_tools() -> Vec<ToolDef> {
                     }
                 },
                 "required": ["AgentId", "Profile"]
+            }),
+            annotations: Some(ToolAnnotations {
+                read_only_hint: Some(false),
+                destructive_hint: Some(false),
+                idempotent_hint: Some(true),
+                open_world_hint: Some(true),
             }),
         },
     ]
@@ -284,18 +341,29 @@ pub async fn handle_tool_call<E: GameEnvironment>(
     match result {
         Ok(value) => Response::success(
             id,
-            serde_json::json!({ "content": [{ "type": "text", "text": value.to_string() }] }),
+            serde_json::json!({
+                "content": [{ "type": "text", "text": value.to_string() }],
+                "isError": false
+            }),
         ),
         Err(e) => {
-            let code = match &e {
-                GameRLError::AgentNotRegistered(_) => error_codes::AGENT_NOT_REGISTERED,
-                GameRLError::InvalidAction(_) => error_codes::INVALID_ACTION,
-                GameRLError::EpisodeTerminated => error_codes::EPISODE_TERMINATED,
-                GameRLError::SyncTimeout => error_codes::SYNC_TIMEOUT,
-                GameRLError::ResourceExhausted(_) => error_codes::RESOURCE_EXHAUSTED,
-                _ => -32603, // Internal error
-            };
-            Response::error(id, code, e.to_string())
+            // Per MCP spec: tool execution errors (invalid action, agent not registered, etc.)
+            // SHOULD be returned as content with isError: true, not as JSON-RPC protocol errors.
+            // Only true protocol errors (unknown tool) use JSON-RPC error responses.
+            match &e {
+                GameRLError::ProtocolError(_) => {
+                    Response::error(id, -32602, e.to_string())
+                }
+                _ => {
+                    Response::success(
+                        id,
+                        serde_json::json!({
+                            "content": [{ "type": "text", "text": e.to_string() }],
+                            "isError": true
+                        }),
+                    )
+                }
+            }
         }
     }
 }

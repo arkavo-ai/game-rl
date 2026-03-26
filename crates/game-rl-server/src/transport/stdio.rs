@@ -3,7 +3,7 @@
 use crate::GameRLServer;
 use crate::environment::GameEnvironment;
 use crate::handler;
-use crate::mcp::{Notification, Request};
+use crate::mcp::{Message, Notification};
 use game_rl_core::Result;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -87,17 +87,35 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>) -> Result<()> {
 
         debug!("Received: {}", trimmed);
 
-        let request: Request = match serde_json::from_str(trimmed) {
-            Ok(r) => r,
+        let message: Message = match serde_json::from_str(trimmed) {
+            Ok(m) => m,
             Err(e) => {
-                error!("Failed to parse request: {}", e);
+                // JSON-RPC 2.0: parse errors MUST return error with id: null
+                warn!("Failed to parse message: {}", e);
+                let parse_error = r#"{"jsonrpc":"2.0","error":{"code":-32700,"message":"Parse error"},"id":null}"#;
+                let mut out = stdout.lock().await;
+                let _ = out.write_all(parse_error.as_bytes()).await;
+                let _ = out.write_all(b"\n").await;
+                let _ = out.flush().await;
+                continue;
+            }
+        };
+
+        // Notifications have no id — acknowledge silently, no response
+        let request = match message {
+            Message::Request(req) => req,
+            Message::Notification(notif) => {
+                debug!("Received notification: {}", notif.method);
                 continue;
             }
         };
 
         let response = handler::handle_request(&request, &server).await;
+        // serde_json::to_string produces compact JSON without embedded newlines
+        // (string values with \n are escaped as \\n), satisfying the stdio transport requirement
         let response_json = serde_json::to_string(&response)
             .map_err(|e| game_rl_core::GameRLError::SerializationError(e.to_string()))?;
+        debug_assert!(!response_json.contains('\n'), "stdio response must not contain embedded newlines");
 
         debug!("Sending: {}", response_json);
 

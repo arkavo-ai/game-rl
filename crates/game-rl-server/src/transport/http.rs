@@ -8,7 +8,7 @@
 use crate::GameRLServer;
 use crate::environment::GameEnvironment;
 use crate::handler;
-use crate::mcp::{Notification, Request};
+use crate::mcp::{Message, Notification};
 use axum::extract::State;
 use axum::http::{HeaderMap, HeaderName, Method, StatusCode};
 use axum::response::sse::{Event, KeepAlive, Sse};
@@ -24,10 +24,11 @@ use std::time::Instant;
 use tokio::sync::RwLock;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::CorsLayer;
 use tracing::{debug, info, warn};
 
 const SESSION_HEADER: &str = "mcp-session-id";
+const PROTOCOL_VERSION_HEADER: &str = "mcp-protocol-version";
 
 /// Session state for an HTTP client
 struct Session {
@@ -84,12 +85,15 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>, addr: SocketAddr) 
         sessions: RwLock::new(SessionManager::new()),
     });
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
+    // CORS: Origin validation happens in the handler (spec: MUST validate Origin).
+    // The CORS layer is permissive here; the handler rejects non-localhost origins with 403.
+    let cors = CorsLayer::permissive()
         .allow_methods([Method::GET, Method::POST, Method::DELETE])
         .allow_headers([
             axum::http::header::CONTENT_TYPE,
+            axum::http::header::ACCEPT,
             HeaderName::from_static(SESSION_HEADER),
+            HeaderName::from_static(PROTOCOL_VERSION_HEADER),
         ])
         .expose_headers([HeaderName::from_static(SESSION_HEADER)]);
 
@@ -124,13 +128,49 @@ fn get_session_id(headers: &HeaderMap) -> Option<String> {
         .map(|s| s.to_string())
 }
 
-/// POST /mcp — handle JSON-RPC request
+/// POST /mcp — handle JSON-RPC request or notification
 async fn handle_post<E: GameEnvironment>(
     State(state): State<Arc<HttpState<E>>>,
     headers: HeaderMap,
-    Json(request): Json<Request>,
+    Json(message): Json<Message>,
 ) -> impl IntoResponse {
+    // Notifications have no id — return 202 Accepted with no body
+    let request = match message {
+        Message::Request(req) => req,
+        Message::Notification(notif) => {
+            debug!("HTTP POST /mcp: notification={}", notif.method);
+            return (StatusCode::ACCEPTED, HeaderMap::new(), Json(serde_json::json!(null))).into_response();
+        }
+    };
+
     debug!("HTTP POST /mcp: method={}", request.method);
+
+    // Validate MCP-Protocol-Version header (spec: MUST be present on HTTP requests)
+    // Backward compat: missing header assumes 2025-03-26
+    if let Some(version) = headers.get(PROTOCOL_VERSION_HEADER).and_then(|v| v.to_str().ok()) {
+        if version != "2025-11-25" && version != "2025-06-18" && version != "2025-03-26" {
+            let response = crate::mcp::Response::error(
+                request.id.clone(),
+                -32600,
+                format!("Unsupported MCP protocol version: {}", version),
+            );
+            return (StatusCode::BAD_REQUEST, HeaderMap::new(), Json(serde_json::to_value(response).unwrap())).into_response();
+        }
+    }
+
+    // Validate Origin header for non-localhost origins (spec: MUST validate)
+    if let Some(origin) = headers.get("origin").and_then(|v| v.to_str().ok()) {
+        let is_local = origin.starts_with("http://localhost")
+            || origin.starts_with("http://127.0.0.1")
+            || origin.starts_with("https://localhost")
+            || origin.starts_with("https://127.0.0.1");
+        if !is_local {
+            return (StatusCode::FORBIDDEN, HeaderMap::new(), Json(serde_json::json!({
+                "jsonrpc": "2.0",
+                "error": {"code": -32600, "message": "Forbidden: invalid Origin"}
+            }))).into_response();
+        }
+    }
 
     // For initialize requests, create a new session
     if request.method == "initialize" {
@@ -146,7 +186,7 @@ async fn handle_post<E: GameEnvironment>(
             HeaderName::from_static(SESSION_HEADER),
             session_id.parse().unwrap(),
         );
-        return (StatusCode::OK, headers, Json(response));
+        return (StatusCode::OK, headers, Json(serde_json::to_value(response).unwrap())).into_response();
     }
 
     // For all other requests, validate the session
@@ -158,7 +198,7 @@ async fn handle_post<E: GameEnvironment>(
                 -32600,
                 "Missing Mcp-Session-Id header. Call initialize first.",
             );
-            return (StatusCode::BAD_REQUEST, HeaderMap::new(), Json(response));
+            return (StatusCode::BAD_REQUEST, HeaderMap::new(), Json(serde_json::to_value(response).unwrap())).into_response();
         }
     };
 
@@ -174,7 +214,7 @@ async fn handle_post<E: GameEnvironment>(
                     -32600,
                     "Unknown session. Call initialize first.",
                 );
-                return (StatusCode::NOT_FOUND, HeaderMap::new(), Json(response));
+                return (StatusCode::NOT_FOUND, HeaderMap::new(), Json(serde_json::to_value(response).unwrap())).into_response();
             }
         }
     }
@@ -207,7 +247,7 @@ async fn handle_post<E: GameEnvironment>(
         HeaderName::from_static(SESSION_HEADER),
         session_id.parse().unwrap(),
     );
-    (StatusCode::OK, resp_headers, Json(response))
+    (StatusCode::OK, resp_headers, Json(serde_json::to_value(response).unwrap())).into_response()
 }
 
 /// GET /mcp — SSE stream for server-initiated notifications
@@ -233,6 +273,9 @@ async fn handle_get_sse<E: GameEnvironment>(
         env.subscribe_events()
     };
 
+    // Spec: Server SHOULD send initial SSE event with empty data to prime reconnection
+    let initial_event = tokio_stream::once(Ok::<_, Infallible>(Event::default().data("")));
+
     let boxed_stream: std::pin::Pin<
         Box<dyn tokio_stream::Stream<Item = std::result::Result<Event, Infallible>> + Send>,
     > = match event_rx {
@@ -255,13 +298,13 @@ async fn handle_get_sse<E: GameEnvironment>(
                     None
                 }
             });
-            Box::pin(mapped)
+            Box::pin(initial_event.chain(mapped))
         }
         None => {
-            // No events supported — return an empty stream that stays open
+            // No events supported — return initial event then stay open
             let pending =
                 tokio_stream::pending::<std::result::Result<Event, Infallible>>();
-            Box::pin(pending)
+            Box::pin(initial_event.chain(pending))
         }
     };
 
