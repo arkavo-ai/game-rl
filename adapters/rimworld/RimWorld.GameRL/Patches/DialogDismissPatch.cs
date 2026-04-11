@@ -12,6 +12,23 @@ using RimWorld;
 namespace RimWorld.GameRL.Patches
 {
     /// <summary>
+    /// Null-safety prefix for LetterStack.RemoveLetter.
+    /// GameEnder.GameEndTick can hold stale references to letters already removed by
+    /// DismissAllDialogs, causing NullReferenceException when it calls RemoveLetter.
+    /// This prefix skips the call if the letter is null or already removed.
+    /// </summary>
+    [HarmonyPatch(typeof(LetterStack), nameof(LetterStack.RemoveLetter))]
+    public static class LetterRemoveNullSafetyPatch
+    {
+        static bool Prefix(LetterStack __instance, Letter let)
+        {
+            if (let == null) return false;
+            if (!__instance.LettersListForReading.Contains(let)) return false;
+            return true;
+        }
+    }
+
+    /// <summary>
     /// Auto-dismiss the faction/settlement naming dialog that appears after landing.
     /// Accepts the default randomized names so the RL agent can proceed.
     /// </summary>

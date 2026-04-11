@@ -199,6 +199,12 @@ impl GameRLClient {
             )
             .await?;
 
+        // Check isError flag per MCP spec
+        let is_error = result
+            .get("isError")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
         // Extract text content from MCP tool response
         let content = result
             .get("content")
@@ -207,6 +213,10 @@ impl GameRLClient {
             .and_then(|c| c.get("text"))
             .and_then(|t| t.as_str())
             .ok_or_else(|| GameRLError::ProtocolError("Invalid tool response".into()))?;
+
+        if is_error {
+            return Err(GameRLError::GameError(content.to_string()));
+        }
 
         serde_json::from_str(content).map_err(Into::into)
     }

@@ -23,7 +23,7 @@ use game_rl_core::{GameManifest, Result};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use tracing::debug;
+use tracing::{debug, trace};
 
 /// Game-RL MCP server
 pub struct GameRLServer<E: GameEnvironment> {
@@ -62,7 +62,7 @@ impl<E: GameEnvironment> GameRLServer<E> {
                 };
                 match result {
                     Ok(obs) => {
-                        debug!("Cache refreshed (tick={})", obs.tick);
+                        trace!("Cache refreshed (tick={})", obs.tick);
                     }
                     Err(e) => {
                         // Don't spam logs — observe may not be supported

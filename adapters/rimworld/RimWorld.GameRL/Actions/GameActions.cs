@@ -215,6 +215,11 @@ namespace RimWorld.GameRL.Actions
             Find.Scenario.PreMapGenerate();
             Current.Game.InitNewGame();
 
+            // 9. Fix ideo-faction consistency — programmatic generation can leave
+            // faction ideos unregistered with IdeoManager, causing tick errors like
+            // "Faction X contains ideo Y which was removed!"
+            RepairFactionIdeos();
+
             Log.Message($"[GameRL] NewColony: Colony generated successfully on tile {tile}");
         }
 
@@ -281,6 +286,41 @@ namespace RimWorld.GameRL.Actions
 
             // Fallback to Rough (Strive to Survive)
             return DifficultyDefOf.Rough;
+        }
+
+        /// <summary>
+        /// Ensures every ideo referenced by a faction is registered with the IdeoManager.
+        /// Without this, IdeoManagerTick() may try to remove an ideo that a faction still
+        /// references, producing "Faction X contains ideo Y which was removed!" errors.
+        /// </summary>
+        private static void RepairFactionIdeos()
+        {
+            var ideoManager = Find.IdeoManager;
+            if (ideoManager == null)
+                return;
+
+            var registeredIdeos = new HashSet<Ideo>(ideoManager.IdeosListForReading);
+            int repaired = 0;
+
+            foreach (var faction in Find.FactionManager.AllFactions)
+            {
+                if (faction.ideos == null)
+                    continue;
+
+                foreach (var ideo in faction.ideos.AllIdeos)
+                {
+                    if (ideo != null && !registeredIdeos.Contains(ideo))
+                    {
+                        ideoManager.Add(ideo);
+                        registeredIdeos.Add(ideo);
+                        repaired++;
+                        Log.Message($"[GameRL] RepairFactionIdeos: Re-registered ideo '{ideo.name}' for faction '{faction.Name}'");
+                    }
+                }
+            }
+
+            if (repaired > 0)
+                Log.Message($"[GameRL] RepairFactionIdeos: Fixed {repaired} unregistered faction ideos");
         }
 
         private static int FindTileForBiome(string biomeName)

@@ -145,7 +145,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                         "minimum": 0
                     }
                 },
-                "required": ["AgentId", "Action"],
+                "required": ["Action"],
                 "additionalProperties": false
             }),
             annotations: mutating.clone(),
@@ -154,6 +154,7 @@ pub fn list_tools() -> Vec<ToolDef> {
             name: "reset".into(),
             description: concat!(
                 "Reset environment for new episode. Returns initial observation.\n",
+                "For scenarios that restart the game (new colony, checkpoint load), returns immediately with Status=Restarting. Poll with observe tool until the game is ready.\n",
                 "\n",
                 "Scenario modes:\n",
                 "  \"checkpoint_name\" — load a saved game checkpoint\n",
@@ -613,11 +614,21 @@ async fn handle_step<E: GameEnvironment>(
     if params.get("AgentId").is_none() {
         let reg = registry.read().await;
         let agent_ids: Vec<String> = reg.list().iter().map(|a| a.agent_id.clone()).collect();
-        return Err(GameRLError::ProtocolError(format!(
-            "Missing required field \"AgentId\" in step. Registered agents: {:?}. Example: {{\"AgentId\": \"{}\", \"Action\": {{\"Type\": \"Wait\"}}}}",
-            agent_ids,
-            agent_ids.first().unwrap_or(&"player1".to_string())
-        )));
+        if agent_ids.len() == 1 {
+            // Auto-fill AgentId when only one agent is registered
+            if let Some(map) = params.as_object_mut() {
+                map.insert(
+                    "AgentId".to_string(),
+                    serde_json::Value::String(agent_ids[0].clone()),
+                );
+            }
+        } else {
+            return Err(GameRLError::ProtocolError(format!(
+                "Missing required field \"AgentId\" in step. Registered agents: {:?}. Example: {{\"AgentId\": \"{}\", \"Action\": {{\"Type\": \"Wait\"}}}}",
+                agent_ids,
+                agent_ids.first().unwrap_or(&"player1".to_string())
+            )));
+        }
     }
 
     if let Err(msg) = normalize_action(&mut params) {

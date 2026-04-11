@@ -9,7 +9,7 @@ use game_rl_core::{GameRLError, Result};
 use game_rl_server::environment::StateUpdate;
 use std::collections::VecDeque;
 use tokio::sync::{broadcast, mpsc, oneshot};
-use tracing::{debug, error, warn};
+use tracing::{debug, error, trace, warn};
 
 /// Trait for async reading from a transport
 #[async_trait]
@@ -68,7 +68,7 @@ pub async fn reader_task<R: AsyncReader>(
                     Ok(data) => {
                         // Log incoming message
                         let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-                        debug!("[Game→Rust] len={} json={}", data.len(), json_preview);
+                        trace!("[Game→Rust] len={} json={}", data.len(), json_preview);
 
                         match deserialize(&data) {
                             Ok(msg) => {

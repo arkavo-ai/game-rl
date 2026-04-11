@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{Mutex, broadcast, mpsc, oneshot, watch};
-use tracing::{debug, info, warn};
+use tracing::{info, trace, warn};
 
 /// Cached observation snapshot
 #[derive(Debug, Clone)]
@@ -49,6 +49,8 @@ pub struct HarmonyBridge {
     cache_tx: watch::Sender<Option<CachedObservation>>,
     /// Receiver for cache reads (cloneable for external consumers)
     cache_rx: watch::Receiver<Option<CachedObservation>>,
+    /// True when a reset triggered a game teardown and we're waiting for reconnection
+    restarting: bool,
 }
 
 impl HarmonyBridge {
@@ -71,6 +73,7 @@ impl HarmonyBridge {
             action_space: None,
             cache_tx,
             cache_rx,
+            restarting: false,
         }
     }
 
@@ -165,6 +168,23 @@ impl HarmonyBridge {
             return Ok(());
         }
 
+        // During game restart after teardown, try once and return quickly.
+        // The model should poll with observe until the game is back.
+        if self.restarting {
+            match self.connect().await {
+                Ok(()) => {
+                    info!("Game reconnected after restart");
+                    self.restarting = false;
+                    return Ok(());
+                }
+                Err(_) => {
+                    return Err(GameRLError::IpcError(
+                        "Game is still restarting after reset. Try again in a few seconds.".into(),
+                    ));
+                }
+            }
+        }
+
         warn!("Game IPC connection lost, attempting reconnect...");
 
         // Try reconnecting with brief backoff
@@ -198,7 +218,7 @@ impl HarmonyBridge {
 
         // Log outgoing message
         let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        debug!("[Rust→C#] len={} json={}", data.len(), json_preview);
+        trace!("[Rust→C#] len={} json={}", data.len(), json_preview);
 
         // Use longer timeout for actions that trigger game reloads (LoadCheckpoint, Reset)
         let timeout_secs = match &msg {
@@ -243,7 +263,7 @@ impl HarmonyBridge {
         let data = serialize(&msg).map_err(|e| GameRLError::SerializationError(e.to_string()))?;
 
         let json_preview: String = String::from_utf8_lossy(&data).chars().take(200).collect();
-        debug!("[Rust→C#] len={} json={}", data.len(), json_preview);
+        trace!("[Rust→C#] len={} json={}", data.len(), json_preview);
 
         let mut guard = self.writer.lock().await;
         let writer = guard
@@ -264,7 +284,7 @@ fn build_step_result(payload: StepResultPayload) -> StepResult {
         }
         game_rl_core::Observation::Vector(_) => None,
     }.unwrap_or(0);
-    debug!("build_step_result: observation variant={}, tick={}",
+    trace!("build_step_result: observation variant={}, tick={}",
         match &payload.observation {
             game_rl_core::Observation::Structured(_) => "Structured",
             game_rl_core::Observation::Custom(_) => "Custom",
@@ -486,60 +506,18 @@ impl GameEnvironment for HarmonyBridge {
             Ok(_) => Err(GameRLError::ProtocolError("Unexpected response".into())),
             Err(_) if will_teardown => {
                 // Game teardown expected — socket died during reload.
-                // Wait for the game to restart and reconnect, then observe.
-                warn!("Reset triggered game teardown, waiting for reconnection...");
-
-                // Poll for reconnection with longer timeout (world gen can take minutes)
-                let max_wait = std::time::Duration::from_secs(300);
-                let start = std::time::Instant::now();
-                let mut connected = false;
-
-                while start.elapsed() < max_wait {
-                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
-
-                    // Try to reconnect
-                    match self.connect().await {
-                        Ok(()) => {
-                            info!("Reconnected after game teardown ({:.0}s)", start.elapsed().as_secs_f64());
-                            connected = true;
-                            break;
-                        }
-                        Err(_) => {
-                            if start.elapsed().as_secs() % 15 == 0 {
-                                info!("Still waiting for game... ({:.0}s elapsed)", start.elapsed().as_secs_f64());
-                            }
-                            continue;
-                        }
-                    }
-                }
-
-                if !connected {
-                    return Err(GameRLError::IpcError(
-                        "Game did not reconnect after teardown (300s timeout)".into(),
-                    ));
-                }
-
-                // Invalidate observation cache since game state completely changed
+                // Return immediately so the model isn't blocked. It should
+                // poll with observe until the game finishes restarting.
+                warn!("Reset triggered game teardown — returning immediately (poll with observe)");
+                self.restarting = true;
                 let _ = self.cache_tx.send(None);
 
-                // Get initial observation from the newly loaded game
-                let obs_response = self.request(GameMessage::Observe).await?;
-                match obs_response {
-                    GameMessage::StepResult { result } => {
-                        let step = build_step_result(result);
-                        let _ = self.cache_tx.send(Some(CachedObservation {
-                            result: step.clone(),
-                            cached_at: std::time::Instant::now(),
-                        }));
-                        Ok(step.observation)
-                    }
-                    GameMessage::Error { code, message } => Err(GameRLError::GameError(
-                        format!("Post-reset observe error {}: {}", code, message),
-                    )),
-                    _ => Err(GameRLError::ProtocolError(
-                        "Unexpected response after reset reconnect".into(),
-                    )),
-                }
+                let mut obs = HashMap::new();
+                obs.insert("Status".to_string(), serde_json::json!("Restarting"));
+                obs.insert("Message".to_string(), serde_json::json!(
+                    "Game is restarting after reset. Poll with observe tool until ready."
+                ));
+                Ok(Observation::Structured(obs))
             }
             Err(e) => Err(e),
         }
