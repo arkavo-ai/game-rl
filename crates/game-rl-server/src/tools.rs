@@ -202,7 +202,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "Default: compact overview with alerts, research, zones, weather.\n",
                 "Step responses are minimal (alerts + feedback only). Use observe to get full state.\n",
                 "\n",
-                "Sections: colonists, resources, entities, terrain, rooms, research, zones, threats, factions, prisoners, traders, power, beds, alerts, actions, map\n",
+                "Sections: colonists, resources, entities, terrain, rooms, research, zones, threats, factions, prisoners, traders, power, beds, alerts, actions, map, landmarks\n",
                 "\n",
                 "Sub-sections: entities.animals, entities.buildings, entities.items, entities.weapons, entities.hostiles\n",
                 "\n",
@@ -782,6 +782,7 @@ fn section_to_field(s: &str) -> &str {
         "validActions" | "actions" => "ValidActions",
         "map" => "Map",
         "visitors" => "Visitors",
+        "landmarks" => "Landmarks",
         other => other,
     }
 }

@@ -123,6 +123,11 @@ namespace RimWorld.GameRL.State
         /// Terrain fertility summary for farming placement (full observations only)
         /// </summary>
         public TerrainSummary? Terrain { get; set; }
+
+        /// <summary>
+        /// Spatial anchors the agent can reference in Near parameters
+        /// </summary>
+        public List<object> Landmarks { get; set; } = new();
     }
 
     /// <summary>
@@ -423,7 +428,8 @@ namespace RimWorld.GameRL.State
                 BedAssignments = ExtractBedAssignments(map),
                 PowerGrid = ExtractPowerGrid(map),
                 Rooms = ExtractRooms(map),
-                Terrain = ExtractTerrainSummary(map)
+                Terrain = ExtractTerrainSummary(map),
+                Landmarks = ExtractLandmarks(map)
             };
 
             // Include last action feedback for RL
@@ -1963,6 +1969,58 @@ namespace RimWorld.GameRL.State
                 Log.Warning($"[GameRL] Failed to extract terrain summary: {ex.Message}");
                 return null;
             }
+        }
+
+        /// <summary>
+        /// Extract a curated list of spatial anchors the agent can reference in Near parameters.
+        /// </summary>
+        private static List<object> ExtractLandmarks(Map? map)
+        {
+            var landmarks = new List<object>();
+            if (map == null) return landmarks;
+
+            try
+            {
+                // MapCenter is always available
+                landmarks.Add(new { Name = "MapCenter", Type = "MapCenter", X = map.Center.x, Y = map.Center.z });
+
+                // Named zones (stockpiles, growing zones)
+                foreach (var zone in map.zoneManager.AllZones.Take(10))
+                {
+                    var cells = zone.Cells.ToList();
+                    if (cells.Count == 0) continue;
+                    int cx = (int)cells.Average(c => c.x);
+                    int cz = (int)cells.Average(c => c.z);
+                    string zoneType = zone is Zone_Stockpile ? "Stockpile"
+                        : zone is Zone_Growing ? "Farm"
+                        : "Zone";
+                    landmarks.Add(new { Name = zone.label ?? zoneType, Type = zoneType, X = cx, Y = cz });
+                }
+
+                // Key buildings (one per type, deduplicated)
+                var seenTypes = new HashSet<string>();
+                foreach (var building in map.listerBuildings.allBuildingsColonist
+                    .OrderBy(b => b.Position.DistanceTo(map.Center)))
+                {
+                    if (seenTypes.Count >= 10) break;
+                    if (seenTypes.Add(building.def.defName))
+                    {
+                        landmarks.Add(new {
+                            Name = building.def.defName,
+                            Id = building.ThingID,
+                            Type = "Building",
+                            X = building.Position.x,
+                            Y = building.Position.z
+                        });
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log.Warning($"[GameRL] Failed to extract landmarks: {ex.Message}");
+            }
+
+            return landmarks;
         }
 
         private MapInfo? ExtractMapInfo(Map? map)
