@@ -164,33 +164,38 @@ namespace RimWorld.GameRL.Actions
             var anchorInfo = DescribeAnchor(near, anchor, map);
 
             var placed = new List<string>();
-            float searchRadius = 15f;
 
-            foreach (var cell in GenRadial.RadialCellsAround(anchor, searchRadius, true))
+            // Adaptive search: start at 15, expand to 40 if obstructed (mountains, buildings)
+            float[] searchRadii = new[] { 15f, 25f, 40f };
+            foreach (float searchRadius in searchRadii)
             {
-                if (placed.Count >= count) break;
-                if (!cell.InBounds(map)) continue;
-
-                // Try all 4 rotations
-                foreach (var rot in new[] { Rot4.North, Rot4.East, Rot4.South, Rot4.West })
+                foreach (var cell in GenRadial.RadialCellsAround(anchor, searchRadius, true))
                 {
-                    var report = GenConstruct.CanPlaceBlueprintAt(buildingDef, cell, rot, map, godMode: false, thing: null, stuffDef: stuffDef);
-                    if (report.Accepted)
+                    if (placed.Count >= count) break;
+                    if (!cell.InBounds(map)) continue;
+
+                    // Try all 4 rotations
+                    foreach (var rot in new[] { Rot4.North, Rot4.East, Rot4.South, Rot4.West })
                     {
-                        var thing = ThingMaker.MakeThing(buildingDef, stuffDef);
-                        thing.SetFaction(Verse.Find.FactionManager.OfPlayer);
-                        GenSpawn.Spawn(thing, cell, map, rot);
-                        placed.Add($"({cell.x},{cell.z})");
-                        break;
+                        var report = GenConstruct.CanPlaceBlueprintAt(buildingDef, cell, rot, map, godMode: false, thing: null, stuffDef: stuffDef);
+                        if (report.Accepted)
+                        {
+                            var thing = ThingMaker.MakeThing(buildingDef, stuffDef);
+                            thing.SetFaction(Verse.Find.FactionManager.OfPlayer);
+                            GenSpawn.Spawn(thing, cell, map, rot);
+                            placed.Add($"({cell.x},{cell.z})");
+                            break;
+                        }
                     }
                 }
+                if (placed.Count >= count) break; // found enough, stop expanding
             }
 
             if (placed.Count == 0)
             {
                 throw new InvalidOperationException(
                     $"PlaceBuildingNear: Could not find valid placement for {buildingDefName} near {near} " +
-                    $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}). Check for obstructions or insufficient space.");
+                    $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}). Area may be mountainous or fully built up.");
             }
 
             var desc = $"Placed {placed.Count} {buildingDefName} near {near} (resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}) at {string.Join(", ", placed)}";
