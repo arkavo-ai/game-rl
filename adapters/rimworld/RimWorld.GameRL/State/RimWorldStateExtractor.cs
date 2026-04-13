@@ -1479,12 +1479,31 @@ namespace RimWorld.GameRL.State
             // Chat requires 2+ non-downed colonists
             if (colonists.Count(p => !p.Downed) >= 2) valid.Add("Chat");
 
-            // Map actions (always possible if map exists)
-            valid.Add("PlaceBlueprint");
-            valid.Add("CreateStockpile");
-            valid.Add("CreateGrowingZone");
-            valid.Add("DesignateMine");
-            valid.Add("DesignateCutPlants");
+            // Intent-based spatial actions (game resolves coordinates)
+            valid.Add("PlaceBuildingNear");
+            valid.Add("EstablishStorage");
+            // Only advertise EstablishFarm if fertile soil exists
+            try
+            {
+                bool hasFertileSoil = map.AllCells.Any(c => c.GetFertility(map) > 0
+                    && map.zoneManager.ZoneAt(c) == null);
+                if (hasFertileSoil) valid.Add("EstablishFarm");
+            }
+            catch { valid.Add("EstablishFarm"); } // fallback: always advertise
+            // Only advertise mining if mineable rocks exist
+            try
+            {
+                bool hasMineable = map.listerThings.AllThings.Any(t => t.def.mineable);
+                if (hasMineable) valid.Add("DesignateMiningNear");
+            }
+            catch { valid.Add("DesignateMiningNear"); }
+            // Only advertise clearing if trees exist
+            try
+            {
+                bool hasTrees = map.listerThings.AllThings.Any(t => t.def.plant?.IsTree == true);
+                if (hasTrees) valid.Add("DesignateClearNear");
+            }
+            catch { valid.Add("DesignateClearNear"); }
 
             // Bill management (requires workbenches)
             try
