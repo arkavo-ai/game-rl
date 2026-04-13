@@ -3,7 +3,8 @@
 use async_trait::async_trait;
 use game_rl_core::{
     Action, AgentConfig, AgentId, AgentManifest, AgentType, EpisodeSummary, GameEvent,
-    GameManifest, Observation, Result, StepResult, StreamDescriptor,
+    GameManifest, Observation, ResolvedPlacement, Result, SpatialIntent, StepResult,
+    StreamDescriptor,
 };
 use tokio::sync::broadcast;
 
@@ -68,6 +69,21 @@ pub trait GameEnvironment: Send + Sync + 'static {
     async fn episode_summary(&mut self) -> Result<EpisodeSummary> {
         Err(game_rl_core::GameRLError::GameError(
             "Episode summary not supported by this environment".into(),
+        ))
+    }
+
+    /// Resolve a spatial intent into concrete placements
+    ///
+    /// Intent-based actions (PlaceBuildingNear, EstablishFarm, etc.) express what to place
+    /// and where relative to an anchor, without specifying coordinates. The game resolves
+    /// the intent using its own spatial APIs and executes the placements.
+    ///
+    /// Default: returns error (game does not support spatial intent).
+    /// Games that set `capabilities.spatial_intent = true` must implement this.
+    async fn resolve_spatial(&mut self, intent: SpatialIntent) -> Result<ResolvedPlacement> {
+        let _ = intent;
+        Err(game_rl_core::GameRLError::GameError(
+            "Spatial intent not supported by this environment".into(),
         ))
     }
 
