@@ -8,7 +8,8 @@ use game_bridge::unix::{UnixReadWrapper, UnixWriteWrapper};
 use game_bridge::{AsyncWriter, GameCapabilities, GameMessage, StepResultPayload, serialize};
 use game_rl_core::{
     Action, ActionSpace, AgentConfig, AgentId, AgentManifest, AgentType, EpisodeSummary,
-    GameManifest, GameRLError, Observation, Result, StepResult, StreamDescriptor,
+    GameManifest, GameRLError, Observation, ResolvedPlacement, Result, SpatialIntent, StepResult,
+    StreamDescriptor,
 };
 use game_rl_server::GameEnvironment;
 use game_rl_server::environment::StateUpdate;
@@ -165,6 +166,12 @@ impl HarmonyBridge {
     /// unless the game is truly unreachable.
     async fn ensure_connected(&mut self) -> Result<()> {
         if !self.request_tx.is_closed() {
+            // Connection is alive. If we were restarting, the game survived
+            // the teardown without dropping the socket — clear the flag.
+            if self.restarting {
+                info!("Game connection alive after restart — clearing restarting flag");
+                self.restarting = false;
+            }
             return Ok(());
         }
 
@@ -366,6 +373,11 @@ impl GameEnvironment for HarmonyBridge {
 
         match response {
             GameMessage::StepResult { result } => {
+                // Game responded successfully — clear restarting flag if set
+                if self.restarting {
+                    info!("Game recovered from restart (observe succeeded)");
+                    self.restarting = false;
+                }
                 let step = build_step_result(result);
                 // Update the cache
                 let _ = self.cache_tx.send(Some(CachedObservation {
@@ -379,6 +391,38 @@ impl GameEnvironment for HarmonyBridge {
                 code, message
             ))),
             _ => Err(GameRLError::ProtocolError("Unexpected response".into())),
+        }
+    }
+
+    async fn resolve_spatial(&mut self, intent: SpatialIntent) -> Result<ResolvedPlacement> {
+        self.ensure_connected().await?;
+
+        let intent_json = serde_json::to_value(&intent)?;
+        let response = self
+            .request(GameMessage::ResolveSpatial {
+                intent: intent_json,
+            })
+            .await?;
+
+        match response {
+            GameMessage::SpatialResult {
+                description,
+                count,
+                anchor_resolved,
+                anchor_position,
+            } => Ok(ResolvedPlacement {
+                description,
+                count,
+                anchor_resolved,
+                anchor_position,
+            }),
+            GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
+                "Spatial resolution error {}: {}",
+                code, message
+            ))),
+            _ => Err(GameRLError::ProtocolError(
+                "Unexpected response to ResolveSpatial".into(),
+            )),
         }
     }
 
@@ -446,6 +490,11 @@ impl GameEnvironment for HarmonyBridge {
 
         match response {
             GameMessage::StepResult { result } => {
+                // Game responded successfully — clear restarting flag if set
+                if self.restarting {
+                    info!("Game recovered from restart (step succeeded)");
+                    self.restarting = false;
+                }
                 let step = build_step_result(result);
                 // Update cache
                 let _ = self.cache_tx.send(Some(CachedObservation {
@@ -498,7 +547,17 @@ impl GameEnvironment for HarmonyBridge {
             .await;
 
         match response {
-            Ok(GameMessage::ResetComplete { observation, .. }) => Ok(observation),
+            Ok(GameMessage::ResetComplete { observation, .. }) => {
+                // Check if game signaled it's about to tear down and restart
+                if let Observation::Structured(ref map) = observation {
+                    if map.get("Status").and_then(|v| v.as_str()) == Some("Restarting") {
+                        info!("Game is restarting after reset — poll with observe until ready");
+                        self.restarting = true;
+                        let _ = self.cache_tx.send(None);
+                    }
+                }
+                Ok(observation)
+            }
             Ok(GameMessage::Error { code, message }) => Err(GameRLError::GameError(format!(
                 "Error {}: {}",
                 code, message
