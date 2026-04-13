@@ -1684,6 +1684,13 @@ namespace RimWorld.GameRL.State
                     else if (zone is Zone_Growing growing)
                     {
                         info.Type = "Growing";
+                        // Repair zones with null plant def (prevents NullReferenceException in WorkGiver_GrowerSow)
+                        if (growing.GetPlantDefToGrow() == null)
+                        {
+                            var fallback = DefDatabase<ThingDef>.GetNamed("Plant_Rice", errorOnFail: false)
+                                ?? DefDatabase<ThingDef>.GetNamed("Plant_Potato", errorOnFail: false);
+                            if (fallback != null) growing.SetPlantDefToGrow(fallback);
+                        }
                         info.PlantType = growing.GetPlantDefToGrow()?.defName;
                     }
                     else
