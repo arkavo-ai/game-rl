@@ -100,6 +100,29 @@ namespace RimWorld.GameRL.Actions
         }
 
         /// <summary>
+        /// Resolve a size parameter from string. Accepts "Small"/"Medium"/"Large" or an integer.
+        /// </summary>
+        private static int ResolveSize(string sizeStr, int defaultSize)
+        {
+            if (string.IsNullOrEmpty(sizeStr))
+                return defaultSize;
+
+            // Named sizes
+            switch (sizeStr.ToLowerInvariant())
+            {
+                case "tiny": case "xs": return 9;
+                case "small": case "s": return 16;
+                case "medium": case "m": case "med": return 25;
+                case "large": case "l": case "big": return 36;
+                case "huge": case "xl": return 49;
+                default:
+                    if (int.TryParse(sizeStr, out int parsed) && parsed > 0)
+                        return parsed;
+                    return defaultSize;
+            }
+        }
+
+        /// <summary>
         /// Get the resolved anchor description for audit trail
         /// </summary>
         private static (string id, int x, int z) DescribeAnchor(string near, IntVec3 pos, Map map)
@@ -176,12 +199,14 @@ namespace RimWorld.GameRL.Actions
             return BuildSpatialResult(desc, (uint)placed.Count, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
-        [GameRLAction("EstablishFarm", Description = "Create a growing zone on fertile soil near a landmark")]
+        [GameRLAction("EstablishFarm", Description = "Create a growing zone on fertile soil near a landmark. Size: Small/Medium/Large or a number of cells.")]
         public static string EstablishFarm(
             [GameRLParam("Near")] string near,
             [GameRLParam("Crop")] string plantDefName = null,
-            [GameRLParam("Size")] int size = 25)
+            [GameRLParam("Size")] string sizeStr = null)
         {
+            int size = ResolveSize(sizeStr, defaultSize: 25);
+
             var map = Find.CurrentMap;
             if (map == null)
                 throw new InvalidOperationException("EstablishFarm: No map loaded");
@@ -241,11 +266,13 @@ namespace RimWorld.GameRL.Actions
             return BuildSpatialResult(desc, (uint)candidates.Count, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
-        [GameRLAction("EstablishStorage", Description = "Create a stockpile zone near a landmark")]
+        [GameRLAction("EstablishStorage", Description = "Create a stockpile zone near a landmark. Size: Small/Medium/Large or a number of cells.")]
         public static string EstablishStorage(
             [GameRLParam("Near")] string near,
-            [GameRLParam("Size")] int size = 25)
+            [GameRLParam("Size")] string sizeStr = null)
         {
+            int size = ResolveSize(sizeStr, defaultSize: 25);
+
             var map = Find.CurrentMap;
             if (map == null)
                 throw new InvalidOperationException("EstablishStorage: No map loaded");
