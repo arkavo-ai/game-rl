@@ -59,6 +59,7 @@ impl Default for Capabilities {
             domain_randomization: false,
             headless: false,
             variable_timestep: false,
+            spatial_intent: false,
         }
     }
 }
@@ -109,6 +110,9 @@ pub struct Capabilities {
     /// Supports variable timestep
     #[serde(default)]
     pub variable_timestep: bool,
+    /// Supports intent-based spatial actions (resolve_spatial)
+    #[serde(default)]
+    pub spatial_intent: bool,
 }
 
 fn default_max_agents() -> usize {
@@ -138,4 +142,22 @@ pub struct Compliance {
     /// URL to test results
     #[serde(skip_serializing_if = "Option::is_none")]
     pub test_results_url: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_capabilities_default_spatial_intent_false() {
+        let caps = Capabilities::default();
+        assert!(!caps.spatial_intent);
+    }
+
+    #[test]
+    fn test_capabilities_spatial_intent_from_json() {
+        let json = r#"{"spatial_intent": true}"#;
+        let caps: Capabilities = serde_json::from_str(json).unwrap();
+        assert!(caps.spatial_intent);
+    }
 }

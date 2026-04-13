@@ -575,6 +575,7 @@ impl GameEnvironment for FactorioBridge {
                 save_replay: true,
                 domain_randomization: true,
                 variable_timestep: true,
+                spatial_intent: false,
             },
             scenarios: vec![
                 Scenario {
