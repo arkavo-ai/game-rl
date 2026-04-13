@@ -254,14 +254,15 @@ namespace RimWorld.GameRL.Actions
                 zone.AddCell(cell);
             }
 
-            if (plantDefName != null)
-            {
-                var plantDef = DefDatabase<ThingDef>.GetNamed(plantDefName, errorOnFail: false);
-                if (plantDef != null)
-                {
-                    zone.SetPlantDefToGrow(plantDef);
-                }
-            }
+            // Always set a plant — zone with null plant def causes NullReferenceException
+            // in WorkGiver_GrowerSow when colonists try to sow
+            var plantDef = plantDefName != null
+                ? DefDatabase<ThingDef>.GetNamed(plantDefName, errorOnFail: false)
+                : null;
+            if (plantDef == null)
+                plantDef = DefDatabase<ThingDef>.GetNamed("PlantRice", errorOnFail: false)
+                    ?? DefDatabase<ThingDef>.GetNamed("PlantPotato", errorOnFail: false);
+            zone.SetPlantDefToGrow(plantDef);
 
             float avgFertility = candidates.Average(c => c.GetFertility(map));
             var desc = $"Established farm ({candidates.Count} cells, avg fertility {avgFertility:F1}) near {near} " +
