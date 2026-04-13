@@ -174,6 +174,24 @@ pub enum GameMessage {
 
     /// Shutdown the game
     Shutdown,
+
+    /// Resolve a spatial intent (Rust -> Game)
+    ResolveSpatial {
+        #[serde(rename = "Intent")]
+        intent: serde_json::Value,
+    },
+
+    /// Spatial resolution result (Game -> Rust)
+    SpatialResult {
+        #[serde(rename = "Description")]
+        description: String,
+        #[serde(rename = "Count")]
+        count: u32,
+        #[serde(rename = "AnchorResolved")]
+        anchor_resolved: String,
+        #[serde(rename = "AnchorPosition")]
+        anchor_position: (i32, i32),
+    },
 }
 
 /// Game capabilities sent during Ready
@@ -258,6 +276,48 @@ mod tests {
         let decoded: GameMessage = deserialize(&bytes).unwrap();
         match decoded {
             GameMessage::GetStateHash => {}
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_resolve_spatial_roundtrip() {
+        let msg = GameMessage::ResolveSpatial {
+            intent: serde_json::json!({
+                "Type": "PlaceBuildingNear",
+                "Building": "Bed",
+                "Near": "Stockpile",
+                "Count": 3
+            }),
+        };
+        let bytes = serialize(&msg).unwrap();
+        let json = String::from_utf8_lossy(&bytes);
+        assert!(json.contains("\"Type\":\"ResolveSpatial\""));
+
+        let decoded: GameMessage = deserialize(&bytes).unwrap();
+        match decoded {
+            GameMessage::ResolveSpatial { intent } => {
+                assert_eq!(intent["Building"], "Bed");
+            }
+            _ => panic!("Wrong message type"),
+        }
+    }
+
+    #[test]
+    fn test_spatial_result_roundtrip() {
+        let msg = GameMessage::SpatialResult {
+            description: "Placed 3 Beds near Stockpile_4821 at (42,13), (44,13), (46,13)".into(),
+            count: 3,
+            anchor_resolved: "Stockpile_4821".into(),
+            anchor_position: (42, 15),
+        };
+        let bytes = serialize(&msg).unwrap();
+        let decoded: GameMessage = deserialize(&bytes).unwrap();
+        match decoded {
+            GameMessage::SpatialResult { count, anchor_resolved, .. } => {
+                assert_eq!(count, 3);
+                assert_eq!(anchor_resolved, "Stockpile_4821");
+            }
             _ => panic!("Wrong message type"),
         }
     }
