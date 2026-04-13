@@ -118,10 +118,15 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "\n",
                 "Spatial actions use Near parameter (entity ID, type name, or 'MapCenter'):\n",
                 "  {\"Action\": {\"Type\": \"PlaceBuildingNear\", \"Building\": \"Bed\", \"Near\": \"Stockpile\", \"Count\": 3}}\n",
-                "  {\"Action\": {\"Type\": \"EstablishFarm\", \"Near\": \"MapCenter\", \"Crop\": \"PlantRice\"}}\n",
+                "  {\"Action\": {\"Type\": \"EstablishFarm\", \"Near\": \"Stockpile\", \"Crop\": \"Rice\"}}\n",
                 "  {\"Action\": {\"Type\": \"EstablishStorage\", \"Near\": \"CookStove\"}}\n",
                 "  {\"Action\": {\"Type\": \"DesignateMiningNear\", \"Near\": \"MapCenter\", \"Count\": 10}}\n",
                 "  {\"Action\": {\"Type\": \"DesignateClearNear\", \"Near\": \"Stockpile\", \"Radius\": 15}}\n",
+                "\n",
+                "Trade (when traders are present — check ValidActions):\n",
+                "  {\"Action\": {\"Type\": \"ListTraderGoods\"}}\n",
+                "  {\"Action\": {\"Type\": \"BuyFromTrader\", \"Item\": \"MealSurvivalPack\", \"Count\": 5}}\n",
+                "  {\"Action\": {\"Type\": \"SellToTrader\", \"ItemId\": \"<id from entities>\", \"Count\": 1}}\n",
                 "\n",
                 "Other examples:\n",
                 "  {\"Action\": {\"Type\": \"SetWorkPriority\", \"ColonistId\": \"<name>\", \"WorkType\": \"Construction\", \"Priority\": 1}}\n",
@@ -140,7 +145,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                         "properties": {
                             "Type": {
                                 "type": "string",
-                                "description": "Action type name (PascalCase). Spatial: PlaceBuildingNear, EstablishFarm, EstablishStorage, DesignateMiningNear, DesignateClearNear. Other: Draft, Undraft, Move, SetWorkPriority, Attack, SetSpeed, DesignateHunt, Rescue, TendTo, Equip, SaveCheckpoint, LoadCheckpoint, Unpause"
+                                "description": "Action type name (PascalCase). Spatial: PlaceBuildingNear, EstablishFarm, EstablishStorage, DesignateMiningNear, DesignateClearNear. Trade: ListTraderGoods, BuyFromTrader, SellToTrader. Other: Draft, Undraft, Move, SetWorkPriority, Attack, SetSpeed, DesignateHunt, Rescue, TendTo, Equip, SaveCheckpoint, LoadCheckpoint, Unpause, AddBill, UnforbidByType"
                             }
                         },
                         "required": ["Type"]

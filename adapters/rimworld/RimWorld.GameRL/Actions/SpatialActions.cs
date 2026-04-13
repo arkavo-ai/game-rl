@@ -271,18 +271,23 @@ namespace RimWorld.GameRL.Actions
             var anchorInfo = DescribeAnchor(near, anchor, map);
 
             // Find fertile cells expanding outward from anchor, prefer higher fertility
+            // Adaptive: expand from 30 to 60 to full map if biome has sparse fertile soil
             var candidates = new List<IntVec3>();
-            float searchRadius = 30f;
+            float[] searchRadii = new[] { 30f, 60f, (float)map.Size.x };
 
-            foreach (var cell in GenRadial.RadialCellsAround(anchor, searchRadius, true))
+            foreach (float searchRadius in searchRadii)
             {
-                if (candidates.Count >= size) break;
-                if (!cell.InBounds(map)) continue;
-                if (cell.GetFertility(map) <= 0) continue;
-                if (map.zoneManager.ZoneAt(cell) != null) continue;
-                if (cell.GetEdifice(map) != null) continue;
+                foreach (var cell in GenRadial.RadialCellsAround(anchor, searchRadius, true))
+                {
+                    if (candidates.Count >= size * 2) break; // collect extra for fertility sorting
+                    if (!cell.InBounds(map)) continue;
+                    if (cell.GetFertility(map) <= 0) continue;
+                    if (map.zoneManager.ZoneAt(cell) != null) continue;
+                    if (cell.GetEdifice(map) != null) continue;
 
-                candidates.Add(cell);
+                    candidates.Add(cell);
+                }
+                if (candidates.Count >= size) break;
             }
 
             // Sort by fertility descending to prefer rich soil, then re-take size
