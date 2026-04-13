@@ -117,9 +117,16 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "\n",
                 "ColonistId must be a real colonist name from the observation (e.g. \"Lizzie\" or \"Fox\"), NOT a placeholder.\n",
                 "\n",
-                "Examples (use real names from your observation):\n",
-                "  {\"AgentId\": \"player1\", \"Action\": {\"Type\": \"SetWorkPriority\", \"ColonistId\": \"<name from observation>\", \"WorkType\": \"Construction\", \"Priority\": 1}}\n",
-                "  {\"AgentId\": \"player1\", \"Action\": {\"Type\": \"Draft\", \"ColonistId\": \"<name from observation>\"}}\n",
+                "Spatial actions use Near parameter (entity ID, type name, or 'MapCenter'):\n",
+                "  {\"Action\": {\"Type\": \"PlaceBuildingNear\", \"Building\": \"Bed\", \"Near\": \"Stockpile\", \"Count\": 3}}\n",
+                "  {\"Action\": {\"Type\": \"EstablishFarm\", \"Near\": \"MapCenter\", \"Crop\": \"PlantRice\"}}\n",
+                "  {\"Action\": {\"Type\": \"EstablishStorage\", \"Near\": \"CookStove\"}}\n",
+                "  {\"Action\": {\"Type\": \"DesignateMiningNear\", \"Near\": \"MapCenter\", \"Count\": 10}}\n",
+                "  {\"Action\": {\"Type\": \"DesignateClearNear\", \"Near\": \"Stockpile\", \"Radius\": 15}}\n",
+                "\n",
+                "Other examples:\n",
+                "  {\"Action\": {\"Type\": \"SetWorkPriority\", \"ColonistId\": \"<name>\", \"WorkType\": \"Construction\", \"Priority\": 1}}\n",
+                "  {\"Action\": {\"Type\": \"Draft\", \"ColonistId\": \"<name>\"}}\n",
             ).into(),
             input_schema: serde_json::json!({
                 "type": "object",
@@ -134,7 +141,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                         "properties": {
                             "Type": {
                                 "type": "string",
-                                "description": "Action type name (PascalCase). e.g. Draft, Undraft, Move, SetWorkPriority, Attack, SetSpeed, DesignateHunt, DesignateMine, PlaceBlueprint, CreateZone, Rescue, TendTo, Equip, SaveCheckpoint, LoadCheckpoint, Unpause"
+                                "description": "Action type name (PascalCase). Spatial: PlaceBuildingNear, EstablishFarm, EstablishStorage, DesignateMiningNear, DesignateClearNear. Other: Draft, Undraft, Move, SetWorkPriority, Attack, SetSpeed, DesignateHunt, Rescue, TendTo, Equip, SaveCheckpoint, LoadCheckpoint, Unpause"
                             }
                         },
                         "required": ["Type"]
