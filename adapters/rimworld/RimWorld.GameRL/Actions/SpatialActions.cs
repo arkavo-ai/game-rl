@@ -123,6 +123,57 @@ namespace RimWorld.GameRL.Actions
         }
 
         /// <summary>
+        /// Resolve a crop name to a RimWorld ThingDef.
+        /// Accepts PascalCase names (Rice, Potato, Corn) and maps to RimWorld defNames (Plant_Rice, etc.).
+        /// </summary>
+        private static ThingDef ResolveCrop(string crop)
+        {
+            if (string.IsNullOrEmpty(crop))
+                return DefDatabase<ThingDef>.GetNamed("Plant_Rice", errorOnFail: false)
+                    ?? DefDatabase<ThingDef>.GetNamed("Plant_Potato", errorOnFail: false);
+
+            // Try direct defName match first (e.g. "Plant_Rice")
+            var direct = DefDatabase<ThingDef>.GetNamed(crop, errorOnFail: false);
+            if (direct != null && direct.plant != null)
+                return direct;
+
+            // Normalize: strip "Plant" prefix if present, then look up as "Plant_<Name>"
+            string normalized = crop;
+            if (normalized.StartsWith("Plant", StringComparison.OrdinalIgnoreCase))
+                normalized = normalized.Substring(5).TrimStart('_');
+
+            // Map common short names to RimWorld defNames
+            string defName;
+            switch (normalized.ToLowerInvariant())
+            {
+                case "rice": defName = "Plant_Rice"; break;
+                case "potato": case "potatoes": defName = "Plant_Potato"; break;
+                case "corn": defName = "Plant_Corn"; break;
+                case "strawberry": case "strawberries": defName = "Plant_Strawberry"; break;
+                case "healroot": defName = "Plant_Healroot"; break;
+                case "cotton": defName = "Plant_Cotton"; break;
+                case "devilstrand": defName = "Plant_Devilstrand"; break;
+                case "haygrass": case "hay": defName = "Plant_Haygrass"; break;
+                case "smokeleaf": defName = "Plant_Smokeleaf"; break;
+                case "psychoid": defName = "Plant_Psychoid"; break;
+                case "hops": defName = "Plant_Hops"; break;
+                case "tinctoria": defName = "Plant_Tinctoria"; break;
+                default:
+                    // Try as "Plant_<input>" with original casing
+                    defName = $"Plant_{normalized}";
+                    break;
+            }
+
+            var resolved = DefDatabase<ThingDef>.GetNamed(defName, errorOnFail: false);
+            if (resolved != null)
+                return resolved;
+
+            throw new InvalidOperationException(
+                $"EstablishFarm: Unknown crop '{crop}'. " +
+                $"Examples: Rice, Potato, Corn, Healroot, Cotton, Haygrass, Strawberry");
+        }
+
+        /// <summary>
         /// Get the resolved anchor description for audit trail
         /// </summary>
         private static (string id, int x, int z) DescribeAnchor(string near, IntVec3 pos, Map map)
@@ -204,7 +255,7 @@ namespace RimWorld.GameRL.Actions
             return BuildSpatialResult(desc, (uint)placed.Count, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
-        [GameRLAction("EstablishFarm", Description = "Create a growing zone on fertile soil near a landmark. Size: Small/Medium/Large or a number of cells.")]
+        [GameRLAction("EstablishFarm", Description = "Create a growing zone on fertile soil near a landmark. Crop: Rice, Potato, Corn, Healroot, Cotton, Haygrass, Strawberry. Size: Small/Medium/Large.")]
         public static string EstablishFarm(
             [GameRLParam("Near")] string near,
             [GameRLParam("Crop")] string plantDefName = null,
@@ -256,13 +307,7 @@ namespace RimWorld.GameRL.Actions
 
             // Always set a plant — zone with null plant def causes NullReferenceException
             // in WorkGiver_GrowerSow when colonists try to sow
-            var plantDef = plantDefName != null
-                ? DefDatabase<ThingDef>.GetNamed(plantDefName, errorOnFail: false)
-                : null;
-            if (plantDef == null)
-                plantDef = DefDatabase<ThingDef>.GetNamed("PlantRice", errorOnFail: false)
-                    ?? DefDatabase<ThingDef>.GetNamed("PlantPotato", errorOnFail: false);
-            zone.SetPlantDefToGrow(plantDef);
+            zone.SetPlantDefToGrow(ResolveCrop(plantDefName));
 
             float avgFertility = candidates.Average(c => c.GetFertility(map));
             var desc = $"Established farm ({candidates.Count} cells, avg fertility {avgFertility:F1}) near {near} " +
