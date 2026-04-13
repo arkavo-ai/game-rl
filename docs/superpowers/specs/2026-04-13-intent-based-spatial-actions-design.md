@@ -40,8 +40,10 @@ Intent-based actions replacing coordinate primitives:
 What the game returns after resolution:
 
 - `actions: Vec<Action>` — the concrete coordinate-bearing actions that were executed
-- `description: String` — human-readable summary (e.g., "Placed 3 Beds near Stockpile at (42,15), (44,15), (46,15)")
+- `description: String` — human-readable summary with full audit trail: resolved anchor identity, anchor coordinates, and placement coordinates. E.g., "Placed 3 Beds near Stockpile (resolved to Stockpile_4821 at 42,15) at (42,13), (44,13), (46,13)". The agent doesn't need coordinates for decision-making, but the Judge needs them for quality assessment and the historian needs them for lesson extraction.
 - `count: u32` — how many were successfully placed (may be less than requested)
+- `anchor_resolved: String` — the entity/zone that was resolved (e.g., "Stockpile_4821")
+- `anchor_position: (i32, i32)` — the resolved anchor's coordinates
 
 Partial success is a valid result, not an error.
 
@@ -152,5 +154,21 @@ This is a convenience subset of existing observation data, optimized for copy-pa
 ## Implications for Learning
 
 1. **Thompson Sampling works** — can reinforce "when Starvation alert fires, EstablishFarm succeeds" because the action is language-native (same complexity as SetWorkPriority)
-2. **Curiosity-driven exploration becomes tractable** — enumerate untried action *types* (small set) instead of untried coordinate combinations (infinite). Synaptic Consolidation can generate "you've never tried EstablishFarm" as a curiosity signal.
-3. **Model selection shifts** — better tool-calling models win (explains Ministral-8B result), because spatial reasoning expressed as tool invocation is a language task again
+2. **Action+anchor combinations are the learning unit** — Thompson Sampling must track action+anchor pairs, not action types alone. `EstablishFarm(Near=Stockpile)` and `EstablishFarm(Near=MapCenter)` have meaningfully different outcomes. The anchor set is small (bounded by the Landmarks section) making this tractable. Beta priors should key on `(action_type, anchor_type)` at minimum — e.g., `(EstablishFarm, Stockpile)` vs `(EstablishFarm, MapCenter)`. The Landmarks section makes this enumerable.
+3. **Curiosity-driven exploration becomes tractable** — enumerate untried action+anchor combinations (small finite set) instead of untried coordinate combinations (infinite). Synaptic Consolidation can generate "you've never tried EstablishFarm near the Stockpile" as a curiosity signal.
+4. **Model selection shifts** — better tool-calling models win (explains Ministral-8B result), because spatial reasoning expressed as tool invocation is a language task again
+
+## Planner Quality Contract
+
+Planner quality directly bounds learning quality. When the planner picks bad tiles (e.g., beds in a traffic corridor), the agent learns "placing beds near stockpile is bad" — the wrong lesson. A buggy resolver poisons Beta priors in ways the agent cannot recover from without manual reset.
+
+The invariant: **when an intent action yields negative reward, the failure should be attributable to the agent's choice (wrong action, wrong anchor, wrong time) — not the planner's tile selection.**
+
+Mitigations:
+- Expand outward from anchor (closest-first via `GenRadial`) — produces spatially sensible layouts
+- Check full building footprint, not just origin cell — avoids overlap and blockage
+- Prefer fertility for farms, standability for stockpiles — avoids obviously bad placements
+- Avoid placing in doorways and high-traffic paths (1-wide corridors between rooms)
+- Integration tests that verify planner output against known map states — catch regressions before they corrupt training data
+
+If the planner cannot find a good placement, it should fail explicitly (count=0, descriptive error) rather than place in a bad location. A clean failure the agent can learn from ("no space near Stockpile") is better than a silent bad placement that corrupts reward attribution.
