@@ -1,8 +1,7 @@
 //! MCP tool handlers for Game-RL protocol
 
 use game_rl_core::{
-    Action, ActionSpace, AgentConfig, AgentId, AgentType, GameRLError, Observation, Result,
-    SpatialIntent,
+    Action, ActionSpace, AgentConfig, AgentId, AgentType, GameRLError, Result, SpatialIntent,
 };
 use serde::{Deserialize, Serialize};
 
@@ -662,32 +661,11 @@ async fn handle_step<E: GameEnvironment>(
         let mut env = environment.write().await;
         env.observe().await?
     } else if is_spatial {
-        // Parse the action as a SpatialIntent and route to resolve_spatial
-        let intent_json = match &p.action {
-            Action::Parameterized { action_type, params } => {
-                let mut map = serde_json::Map::new();
-                map.insert("Type".to_string(), serde_json::Value::String(action_type.clone()));
-                for (k, v) in params {
-                    map.insert(k.clone(), v.clone());
-                }
-                serde_json::Value::Object(map)
-            }
-            _ => unreachable!(),
-        };
-        let intent: SpatialIntent = serde_json::from_value(intent_json).map_err(|e| {
-            GameRLError::InvalidAction(format!("Invalid spatial intent: {}", e))
-        })?;
-
+        // Spatial intent actions bypass manifest validation — they're dispatched
+        // directly to the game via the normal step path. The game's [GameRLAction]
+        // handler resolves coordinates and executes the placement.
         let mut env = environment.write().await;
-        let placement = env.resolve_spatial(intent).await?;
-
-        // Return placement result as a StepResult-shaped response
-        let mut result = env.observe().await?;
-        // Inject spatial result into observation
-        if let Observation::Structured(ref mut map) = result.observation {
-            map.insert("SpatialResult".to_string(), serde_json::to_value(&placement)?);
-        }
-        result
+        env.step(&p.agent_id, p.action, p.ticks).await?
     } else {
         // Validate and auto-correct action type against manifest
         if let Action::Parameterized {

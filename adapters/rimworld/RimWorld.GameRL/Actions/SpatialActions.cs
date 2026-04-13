@@ -149,16 +149,15 @@ namespace RimWorld.GameRL.Actions
                 if (!cell.InBounds(map)) continue;
 
                 // Try all 4 rotations
-                bool didPlace = false;
                 foreach (var rot in new[] { Rot4.North, Rot4.East, Rot4.South, Rot4.West })
                 {
                     var report = GenConstruct.CanPlaceBlueprintAt(buildingDef, cell, rot, map, godMode: false, thing: null, stuffDef: stuffDef);
                     if (report.Accepted)
                     {
                         var thing = ThingMaker.MakeThing(buildingDef, stuffDef);
+                        thing.SetFaction(Verse.Find.FactionManager.OfPlayer);
                         GenSpawn.Spawn(thing, cell, map, rot);
                         placed.Add($"({cell.x},{cell.z})");
-                        didPlace = true;
                         break;
                     }
                 }
