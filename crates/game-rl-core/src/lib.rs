@@ -16,6 +16,7 @@ pub mod manifest;
 pub mod observation;
 pub mod reward;
 pub mod stream;
+pub mod spatial;
 
 pub use action::{Action, ActionSpace};
 pub use agent::{AgentConfig, AgentEntry, AgentId, AgentManifest, AgentStatus, AgentType};
@@ -24,3 +25,4 @@ pub use manifest::{Capabilities, GameManifest};
 pub use observation::{EpisodeSummary, GameEvent, Observation, StepResult};
 pub use reward::{Reward, RewardComponents};
 pub use stream::{PixelFormat, StreamDescriptor, StreamProfile};
+pub use spatial::{ResolvedPlacement, SpatialIntent};
