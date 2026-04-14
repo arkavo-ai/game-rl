@@ -367,18 +367,14 @@ pub async fn handle_tool_call<E: GameEnvironment>(
             // SHOULD be returned as content with isError: true, not as JSON-RPC protocol errors.
             // Only true protocol errors (unknown tool) use JSON-RPC error responses.
             match &e {
-                GameRLError::ProtocolError(_) => {
-                    Response::error(id, -32602, e.to_string())
-                }
-                _ => {
-                    Response::success(
-                        id,
-                        serde_json::json!({
-                            "content": [{ "type": "text", "text": e.to_string() }],
-                            "isError": true
-                        }),
-                    )
-                }
+                GameRLError::ProtocolError(_) => Response::error(id, -32602, e.to_string()),
+                _ => Response::success(
+                    id,
+                    serde_json::json!({
+                        "content": [{ "type": "text", "text": e.to_string() }],
+                        "isError": true
+                    }),
+                ),
             }
         }
     }
@@ -474,7 +470,16 @@ fn normalize_step_fields(params: &mut serde_json::Value) {
 fn normalize_action_params(map: &mut serde_json::Map<String, serde_json::Value>) {
     // ColonistName → ColonistId (LLMs use name from few-shot examples)
     if !map.contains_key("ColonistId") {
-        for key in ["ColonistName", "colonist_name", "colonistName", "colonist_id", "colonistId", "PawnId", "pawnId", "pawn_id"] {
+        for key in [
+            "ColonistName",
+            "colonist_name",
+            "colonistName",
+            "colonist_id",
+            "colonistId",
+            "PawnId",
+            "pawnId",
+            "pawn_id",
+        ] {
             if let Some(val) = map.remove(key) {
                 map.insert("ColonistId".to_string(), val);
                 break;
@@ -485,7 +490,10 @@ fn normalize_action_params(map: &mut serde_json::Map<String, serde_json::Value>)
 
 /// Fuzzy match an action name against known actions using edit distance.
 /// Returns the corrected name if a close match is found (distance <= 3 and < 40% of name length).
-fn fuzzy_match_action(input: &str, actions: &[game_rl_core::action::ActionDefinition]) -> Option<String> {
+fn fuzzy_match_action(
+    input: &str,
+    actions: &[game_rl_core::action::ActionDefinition],
+) -> Option<String> {
     let input_lower = input.to_lowercase();
     let mut best: Option<(&str, usize)> = None;
 
@@ -571,7 +579,14 @@ fn normalize_action(params: &mut serde_json::Value) -> std::result::Result<(), S
             }
 
             // Alternative key names → rename to "Type"
-            for key in ["action_type", "ActionType", "name", "Name", "command", "Command"] {
+            for key in [
+                "action_type",
+                "ActionType",
+                "name",
+                "Name",
+                "command",
+                "Command",
+            ] {
                 if let Some(type_val) = map.remove(key) {
                     map.insert("Type".to_string(), type_val);
                     return Ok(());
@@ -677,7 +692,8 @@ async fn handle_step<E: GameEnvironment>(
     } else {
         // Validate and auto-correct action type against manifest
         if let Action::Parameterized {
-            ref mut action_type, ..
+            ref mut action_type,
+            ..
         } = p.action
         {
             let env = environment.read().await;
@@ -744,8 +760,17 @@ struct ObserveParams {
 
 /// Sections excluded by default (large/specialized — request via Include)
 const DRILLDOWN_SECTIONS: &[&str] = &[
-    "Entities", "Terrain", "Rooms", "BedAssignments", "PowerGrid",
-    "FactionRelations", "Prisoners", "ActiveTraders", "Map", "Visitors", "Threats",
+    "Entities",
+    "Terrain",
+    "Rooms",
+    "BedAssignments",
+    "PowerGrid",
+    "FactionRelations",
+    "Prisoners",
+    "ActiveTraders",
+    "Map",
+    "Visitors",
+    "Threats",
 ];
 
 /// Map user-facing section name to PascalCase JSON field
@@ -800,10 +825,18 @@ struct FilterConfig {
 
 impl FilterConfig {
     fn compact() -> Self {
-        Self { include: None, limit: None, step_mode: false }
+        Self {
+            include: None,
+            limit: None,
+            step_mode: false,
+        }
     }
     fn step() -> Self {
-        Self { include: None, limit: None, step_mode: true }
+        Self {
+            include: None,
+            limit: None,
+            step_mode: true,
+        }
     }
 }
 
@@ -839,8 +872,16 @@ fn filter_observation_content(value: &mut serde_json::Value, config: &FilterConf
 
     match &config.include {
         Some(sections) => {
-            let always_keep = ["Tick", "ColonistCount", "Hour", "Season", "Weather", "Temperature"];
-            let mut keep_fields: std::collections::HashSet<String> = std::collections::HashSet::new();
+            let always_keep = [
+                "Tick",
+                "ColonistCount",
+                "Hour",
+                "Season",
+                "Weather",
+                "Temperature",
+            ];
+            let mut keep_fields: std::collections::HashSet<String> =
+                std::collections::HashSet::new();
             let mut entity_subs: Vec<String> = Vec::new();
 
             for s in sections {
@@ -853,7 +894,8 @@ fn filter_observation_content(value: &mut serde_json::Value, config: &FilterConf
             }
 
             // Remove fields not requested
-            let keys_to_remove: Vec<String> = obs_obj.keys()
+            let keys_to_remove: Vec<String> = obs_obj
+                .keys()
                 .filter(|k| !always_keep.contains(&k.as_str()) && !keep_fields.contains(k.as_str()))
                 .cloned()
                 .collect();
@@ -863,11 +905,12 @@ fn filter_observation_content(value: &mut serde_json::Value, config: &FilterConf
 
             // Filter entities sub-sections if dot notation was used
             if !entity_subs.is_empty() {
-                if let Some(entities) = obs_obj.get_mut("Entities").and_then(|v| v.as_object_mut()) {
-                    let entity_keep: std::collections::HashSet<&str> = entity_subs.iter()
-                        .map(|s| entities_sub_field(s))
-                        .collect();
-                    let entity_remove: Vec<String> = entities.keys()
+                if let Some(entities) = obs_obj.get_mut("Entities").and_then(|v| v.as_object_mut())
+                {
+                    let entity_keep: std::collections::HashSet<&str> =
+                        entity_subs.iter().map(|s| entities_sub_field(s)).collect();
+                    let entity_remove: Vec<String> = entities
+                        .keys()
                         .filter(|k| !entity_keep.contains(k.as_str()))
                         .cloned()
                         .collect();
@@ -906,9 +949,9 @@ fn filter_observation_content(value: &mut serde_json::Value, config: &FilterConf
 
 /// Sections excluded from step responses (slow-changing, available via observe)
 const STEP_EXCLUDE_SECTIONS: &[&str] = &[
-    "Research",      // Only changes on SelectResearch action
-    "ValidActions",  // Essentially static (available from manifest)
-    "Zones",         // Only changes on zone create/delete
+    "Research",     // Only changes on SelectResearch action
+    "ValidActions", // Essentially static (available from manifest)
+    "Zones",        // Only changes on zone create/delete
 ];
 
 /// Fields to strip from each colonist in compact mode.
@@ -952,7 +995,8 @@ fn strip_noise(value: &mut serde_json::Value) {
                 strip_noise(v);
             }
             // Then remove empty/null/false fields
-            let remove: Vec<String> = map.iter()
+            let remove: Vec<String> = map
+                .iter()
                 .filter(|(_, v)| {
                     v.is_null()
                         || v.as_array().map_or(false, |a| a.is_empty())
@@ -979,8 +1023,12 @@ fn strip_zero_resources(obs_obj: &mut serde_json::Map<String, serde_json::Value>
         Some(r) => r,
         None => return,
     };
-    if let Some(stockpiles) = resources.get_mut("Stockpiles").and_then(|v| v.as_object_mut()) {
-        let zeros: Vec<String> = stockpiles.iter()
+    if let Some(stockpiles) = resources
+        .get_mut("Stockpiles")
+        .and_then(|v| v.as_object_mut())
+    {
+        let zeros: Vec<String> = stockpiles
+            .iter()
             .filter(|(_, v)| v.as_f64() == Some(0.0) || v.as_i64() == Some(0))
             .map(|(k, _)| k.clone())
             .collect();
@@ -1000,7 +1048,9 @@ fn strip_unstartable_research(obs_obj: &mut serde_json::Map<String, serde_json::
     };
     if let Some(available) = research.get_mut("Available").and_then(|v| v.as_array_mut()) {
         available.retain(|item| {
-            item.get("CanStart").and_then(|v| v.as_bool()).unwrap_or(false)
+            item.get("CanStart")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
         });
         // Remove the CanStart field itself since they're all true now
         for item in available.iter_mut() {
@@ -1011,11 +1061,9 @@ fn strip_unstartable_research(obs_obj: &mut serde_json::Map<String, serde_json::
         }
     }
     // Strip null/zero-value fields (CurrentProject: null, Progress: 0.0)
-    let nulls: Vec<String> = research.iter()
-        .filter(|(_, v)| {
-            v.is_null()
-                || v.as_f64() == Some(0.0)
-        })
+    let nulls: Vec<String> = research
+        .iter()
+        .filter(|(_, v)| v.is_null() || v.as_f64() == Some(0.0))
         .map(|(k, _)| k.clone())
         .collect();
     for key in nulls {
@@ -1040,7 +1088,11 @@ fn strip_step_wrapper(obj: &mut serde_json::Map<String, serde_json::Value>) {
     if obj.get("Reward").and_then(|v| v.as_f64()) == Some(0.0) {
         obj.remove("Reward");
     }
-    if obj.get("RewardComponents").and_then(|v| v.as_object()).map_or(false, |o| o.is_empty()) {
+    if obj
+        .get("RewardComponents")
+        .and_then(|v| v.as_object())
+        .map_or(false, |o| o.is_empty())
+    {
         obj.remove("RewardComponents");
     }
     if obj.get("Done") == Some(&serde_json::Value::Bool(false)) {
@@ -1052,10 +1104,18 @@ fn strip_step_wrapper(obj: &mut serde_json::Map<String, serde_json::Value>) {
     if obj.get("StepId").and_then(|v| v.as_u64()) == Some(0) {
         obj.remove("StepId");
     }
-    if obj.get("FrameIds").and_then(|v| v.as_object()).map_or(false, |o| o.is_empty()) {
+    if obj
+        .get("FrameIds")
+        .and_then(|v| v.as_object())
+        .map_or(false, |o| o.is_empty())
+    {
         obj.remove("FrameIds");
     }
-    if obj.get("Events").and_then(|v| v.as_array()).map_or(false, |a| a.is_empty()) {
+    if obj
+        .get("Events")
+        .and_then(|v| v.as_array())
+        .map_or(false, |a| a.is_empty())
+    {
         obj.remove("Events");
     }
 }
@@ -1064,13 +1124,21 @@ fn strip_step_wrapper(obj: &mut serde_json::Map<String, serde_json::Value>) {
 fn apply_terrain_limit(obs_obj: &mut serde_json::Map<String, serde_json::Value>, limit: usize) {
     if let Some(terrain) = obs_obj.get_mut("Terrain").and_then(|v| v.as_object_mut()) {
         // Sort and truncate regions, capturing metadata
-        let (total, showing) = if let Some(regions) = terrain.get_mut("FertileRegions").and_then(|v| v.as_array_mut()) {
+        let (total, showing) = if let Some(regions) = terrain
+            .get_mut("FertileRegions")
+            .and_then(|v| v.as_array_mut())
+        {
             regions.sort_by(|a, b| {
-                let fert_cmp = b.get("Fertility").and_then(|v| v.as_f64()).unwrap_or(0.0)
+                let fert_cmp = b
+                    .get("Fertility")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(0.0)
                     .partial_cmp(&a.get("Fertility").and_then(|v| v.as_f64()).unwrap_or(0.0))
                     .unwrap_or(std::cmp::Ordering::Equal);
                 if fert_cmp == std::cmp::Ordering::Equal {
-                    b.get("CellCount").and_then(|v| v.as_u64()).unwrap_or(0)
+                    b.get("CellCount")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0)
                         .cmp(&a.get("CellCount").and_then(|v| v.as_u64()).unwrap_or(0))
                 } else {
                     fert_cmp
@@ -1091,9 +1159,16 @@ fn apply_terrain_limit(obs_obj: &mut serde_json::Map<String, serde_json::Value>,
 fn needs_full_state(sections: &[String]) -> bool {
     sections.iter().any(|s| {
         let base = s.split('.').next().unwrap_or(s);
-        matches!(section_to_field(base),
-            "Entities" | "Terrain" | "Rooms" | "BedAssignments" | "PowerGrid" |
-            "Map" | "Visitors" | "Colonists"
+        matches!(
+            section_to_field(base),
+            "Entities"
+                | "Terrain"
+                | "Rooms"
+                | "BedAssignments"
+                | "PowerGrid"
+                | "Map"
+                | "Visitors"
+                | "Colonists"
         )
     })
 }
@@ -1119,16 +1194,22 @@ async fn handle_observe<E: GameEnvironment>(
                 id
             } else {
                 let reg = registry.read().await;
-                reg.list().first().map(|e| e.agent_id.clone()).unwrap_or_else(|| "default".into())
+                reg.list()
+                    .first()
+                    .map(|e| e.agent_id.clone())
+                    .unwrap_or_else(|| "default".into())
             };
-            match env.step(
-                &agent_id,
-                Action::Parameterized {
-                    action_type: "RequestFullState".into(),
-                    params: Default::default(),
-                },
-                0,
-            ).await {
+            match env
+                .step(
+                    &agent_id,
+                    Action::Parameterized {
+                        action_type: "RequestFullState".into(),
+                        params: Default::default(),
+                    },
+                    0,
+                )
+                .await
+            {
                 Ok(step_result) => step_result,
                 Err(e) => {
                     tracing::debug!("RequestFullState failed, falling back to observe: {}", e);
@@ -1143,7 +1224,11 @@ async fn handle_observe<E: GameEnvironment>(
     };
 
     let value = serde_json::to_value(result)?;
-    let config = FilterConfig { include: p.include, limit: p.limit, step_mode: false };
+    let config = FilterConfig {
+        include: p.include,
+        limit: p.limit,
+        step_mode: false,
+    };
     Ok(filter_observation(value, &config))
 }
 
@@ -1356,7 +1441,10 @@ mod tests {
         normalize_action(&mut params).unwrap();
         let p: SimStepParams = serde_json::from_value(params).unwrap();
         match p.action {
-            Action::Parameterized { action_type, params } => {
+            Action::Parameterized {
+                action_type,
+                params,
+            } => {
                 assert_eq!(action_type, "Draft");
                 assert_eq!(params.get("ColonistId").unwrap(), "H1");
             }
@@ -1375,7 +1463,8 @@ mod tests {
 
     #[test]
     fn test_colonist_name_normalized() {
-        let mut params = json!({"AgentId": "p1", "Action": {"Type": "Draft", "ColonistName": "Lizzie"}});
+        let mut params =
+            json!({"AgentId": "p1", "Action": {"Type": "Draft", "ColonistName": "Lizzie"}});
         normalize_action(&mut params).unwrap();
         assert_eq!(params["Action"]["ColonistId"], "Lizzie");
         assert!(params["Action"].get("ColonistName").is_none());

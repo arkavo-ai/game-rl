@@ -230,12 +230,10 @@ impl HarmonyBridge {
         // Use longer timeout for actions that trigger game reloads (LoadCheckpoint, Reset)
         let timeout_secs = match &msg {
             GameMessage::Reset { .. } => 120,
-            GameMessage::ExecuteAction { action, .. } => {
-                match action {
-                    Action::Parameterized { action_type, .. } if action_type == "LoadCheckpoint" => 120,
-                    _ => 30,
-                }
-            }
+            GameMessage::ExecuteAction { action, .. } => match action {
+                Action::Parameterized { action_type, .. } if action_type == "LoadCheckpoint" => 120,
+                _ => 30,
+            },
             _ => 30,
         };
 
@@ -256,10 +254,16 @@ impl HarmonyBridge {
             writer.write_message(&data).await?;
         }
 
-        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), response_rx).await {
+        match tokio::time::timeout(std::time::Duration::from_secs(timeout_secs), response_rx).await
+        {
             Ok(Ok(result)) => result,
-            Ok(Err(_)) => Err(GameRLError::IpcError("Response channel closed: reader task may have died".into())),
-            Err(_) => Err(GameRLError::IpcError(format!("Response timeout after {}s: game may be unresponsive", timeout_secs))),
+            Ok(Err(_)) => Err(GameRLError::IpcError(
+                "Response channel closed: reader task may have died".into(),
+            )),
+            Err(_) => Err(GameRLError::IpcError(format!(
+                "Response timeout after {}s: game may be unresponsive",
+                timeout_secs
+            ))),
         }
     }
 
@@ -283,20 +287,20 @@ impl HarmonyBridge {
 fn build_step_result(payload: StepResultPayload) -> StepResult {
     // Extract tick from observation regardless of variant
     let tick = match &payload.observation {
-        game_rl_core::Observation::Structured(map) => {
-            map.get("Tick").and_then(|v| v.as_u64())
-        }
-        game_rl_core::Observation::Custom(val) => {
-            val.get("Tick").and_then(|v| v.as_u64())
-        }
+        game_rl_core::Observation::Structured(map) => map.get("Tick").and_then(|v| v.as_u64()),
+        game_rl_core::Observation::Custom(val) => val.get("Tick").and_then(|v| v.as_u64()),
         game_rl_core::Observation::Vector(_) => None,
-    }.unwrap_or(0);
-    trace!("build_step_result: observation variant={}, tick={}",
+    }
+    .unwrap_or(0);
+    trace!(
+        "build_step_result: observation variant={}, tick={}",
         match &payload.observation {
             game_rl_core::Observation::Structured(_) => "Structured",
             game_rl_core::Observation::Custom(_) => "Custom",
             game_rl_core::Observation::Vector(_) => "Vector",
-        }, tick);
+        },
+        tick
+    );
     StepResult {
         agent_id: payload.agent_id,
         step_id: 0,
@@ -436,12 +440,14 @@ impl GameEnvironment for HarmonyBridge {
         // Check cache: if fresh AND caller requested no ticks, send action-only (ticks=0)
         // and return cached observation. Never use cache when ticks > 0 — the game must
         // actually advance, and CompleteStep() must run for reward accumulation.
-        let cache_fresh = ticks == 0 && !is_full_state_request && self
-            .cache_rx
-            .borrow()
-            .as_ref()
-            .map(|c| c.cached_at.elapsed() < std::time::Duration::from_millis(500))
-            .unwrap_or(false);
+        let cache_fresh = ticks == 0
+            && !is_full_state_request
+            && self
+                .cache_rx
+                .borrow()
+                .as_ref()
+                .map(|c| c.cached_at.elapsed() < std::time::Duration::from_millis(500))
+                .unwrap_or(false);
 
         if cache_fresh {
             // Action-only mode: send action with ticks=0, game executes but skips observation extraction
@@ -573,9 +579,12 @@ impl GameEnvironment for HarmonyBridge {
 
                 let mut obs = HashMap::new();
                 obs.insert("Status".to_string(), serde_json::json!("Restarting"));
-                obs.insert("Message".to_string(), serde_json::json!(
-                    "Game is restarting after reset. Poll with observe tool until ready."
-                ));
+                obs.insert(
+                    "Message".to_string(),
+                    serde_json::json!(
+                        "Game is restarting after reset. Poll with observe tool until ready."
+                    ),
+                );
                 Ok(Observation::Structured(obs))
             }
             Err(e) => Err(e),

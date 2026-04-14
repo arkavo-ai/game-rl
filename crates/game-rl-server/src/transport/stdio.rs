@@ -115,7 +115,10 @@ pub async fn run<E: GameEnvironment>(server: GameRLServer<E>) -> Result<()> {
         // (string values with \n are escaped as \\n), satisfying the stdio transport requirement
         let response_json = serde_json::to_string(&response)
             .map_err(|e| game_rl_core::GameRLError::SerializationError(e.to_string()))?;
-        debug_assert!(!response_json.contains('\n'), "stdio response must not contain embedded newlines");
+        debug_assert!(
+            !response_json.contains('\n'),
+            "stdio response must not contain embedded newlines"
+        );
 
         debug!("Sending: {}", response_json);
 

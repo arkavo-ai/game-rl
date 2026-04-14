@@ -172,9 +172,7 @@ impl GameRLClient {
 
     /// Get state hash for determinism verification
     pub async fn state_hash(&mut self) -> Result<String> {
-        let result = self
-            .call_tool("stateHash", serde_json::json!({}))
-            .await?;
+        let result = self.call_tool("stateHash", serde_json::json!({})).await?;
 
         result
             .get("hash")

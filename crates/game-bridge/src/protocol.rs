@@ -314,7 +314,11 @@ mod tests {
         let bytes = serialize(&msg).unwrap();
         let decoded: GameMessage = deserialize(&bytes).unwrap();
         match decoded {
-            GameMessage::SpatialResult { count, anchor_resolved, .. } => {
+            GameMessage::SpatialResult {
+                count,
+                anchor_resolved,
+                ..
+            } => {
                 assert_eq!(count, 3);
                 assert_eq!(anchor_resolved, "Stockpile_4821");
             }

@@ -84,8 +84,16 @@ pub async fn reader_task<R: AsyncReader>(
                                         let _ = event_tx.send(update);
                                     }
 
-                                    // Response to a pending request
+                                    // Response to a pending request.
+                                    // Skip stale entries whose receiver was dropped (e.g. timed-out requests).
+                                    // Without this, a single unsent response creates a permanent off-by-one
+                                    // cascade where every response is consumed by the wrong channel.
                                     _ => {
+                                        // Drain stale channels first
+                                        while pending.front().map_or(false, |tx| tx.is_closed()) {
+                                            pending.pop_front();
+                                            warn!("Skipping stale pending response channel (receiver dropped)");
+                                        }
                                         if let Some(response_tx) = pending.pop_front() {
                                             let _ = response_tx.send(Ok(msg));
                                         } else {

@@ -82,7 +82,9 @@ impl SpatialIntent {
 
     /// Check if an action type name is a spatial intent
     pub fn is_spatial_action(action_type: &str) -> bool {
-        Self::VARIANTS.iter().any(|v| v.eq_ignore_ascii_case(action_type))
+        Self::VARIANTS
+            .iter()
+            .any(|v| v.eq_ignore_ascii_case(action_type))
     }
 }
 
@@ -109,7 +111,12 @@ mod tests {
         let json = r#"{"Type":"PlaceBuildingNear","Building":"Bed","Near":"Stockpile","Count":3,"Stuff":"WoodLog"}"#;
         let intent: SpatialIntent = serde_json::from_str(json).unwrap();
         match intent {
-            SpatialIntent::PlaceBuildingNear { building, near, count, stuff } => {
+            SpatialIntent::PlaceBuildingNear {
+                building,
+                near,
+                count,
+                stuff,
+            } => {
                 assert_eq!(building, "Bed");
                 assert_eq!(near, "Stockpile");
                 assert_eq!(count, 3);
@@ -150,7 +157,14 @@ mod tests {
     fn test_spatial_intent_names() {
         assert_eq!(
             SpatialIntent::VARIANTS,
-            &["PlaceBuildingNear", "EstablishFarm", "EstablishStorage", "DesignateMiningNear", "DesignateClearNear", "DefendColony"]
+            &[
+                "PlaceBuildingNear",
+                "EstablishFarm",
+                "EstablishStorage",
+                "DesignateMiningNear",
+                "DesignateClearNear",
+                "DefendColony"
+            ]
         );
     }
 }
