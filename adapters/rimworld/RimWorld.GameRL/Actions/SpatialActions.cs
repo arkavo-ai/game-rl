@@ -270,37 +270,78 @@ namespace RimWorld.GameRL.Actions
             var anchor = ResolveAnchor(near, map);
             var anchorInfo = DescribeAnchor(near, anchor, map);
 
-            // Find fertile cells expanding outward from anchor, prefer higher fertility
-            // Adaptive: expand from 30 to 60 to full map if biome has sparse fertile soil
+            // Find fertile cells — anchor is a preference, not a hard constraint.
+            // Strategy: search near anchor first, but if barren (mountains, rock),
+            // find the best fertile region on the map closest to colony activity.
             var candidates = new List<IntVec3>();
-            float[] searchRadii = new[] { 30f, 60f, (float)map.Size.x };
 
-            foreach (float searchRadius in searchRadii)
+            // Pass 1: search outward from anchor
+            foreach (var cell in GenRadial.RadialCellsAround(anchor, 40f, true))
             {
-                foreach (var cell in GenRadial.RadialCellsAround(anchor, searchRadius, true))
-                {
-                    if (candidates.Count >= size * 2) break; // collect extra for fertility sorting
-                    if (!cell.InBounds(map)) continue;
-                    if (cell.GetFertility(map) <= 0) continue;
-                    if (map.zoneManager.ZoneAt(cell) != null) continue;
-                    if (cell.GetEdifice(map) != null) continue;
-
-                    candidates.Add(cell);
-                }
-                if (candidates.Count >= size) break;
+                if (candidates.Count >= size * 2) break;
+                if (!cell.InBounds(map)) continue;
+                if (cell.GetFertility(map) <= 0) continue;
+                if (map.zoneManager.ZoneAt(cell) != null) continue;
+                if (cell.GetEdifice(map) != null) continue;
+                candidates.Add(cell);
             }
 
-            // Sort by fertility descending to prefer rich soil, then re-take size
-            candidates = candidates
-                .OrderByDescending(c => c.GetFertility(map))
-                .Take(size)
-                .ToList();
+            // Pass 2: if anchor area is barren, find best fertile region on map
+            // Re-anchor to the densest fertile area closest to colony buildings
+            if (candidates.Count < size)
+            {
+                candidates.Clear();
+                // Find colony center (average of all colonist buildings, or map center)
+                var colonyCenter = map.Center;
+                var buildings = map.listerBuildings.allBuildingsColonist;
+                if (buildings.Count > 0)
+                {
+                    int bx = (int)buildings.Average(b => b.Position.x);
+                    int bz = (int)buildings.Average(b => b.Position.z);
+                    colonyCenter = new IntVec3(bx, 0, bz);
+                }
+
+                // Scan all fertile cells, score by fertility and proximity to colony
+                var allFertile = new List<(IntVec3 cell, float score)>();
+                foreach (var cell in map.AllCells)
+                {
+                    float fertility = cell.GetFertility(map);
+                    if (fertility <= 0) continue;
+                    if (map.zoneManager.ZoneAt(cell) != null) continue;
+                    if (cell.GetEdifice(map) != null) continue;
+                    // Score: high fertility + close to colony = best
+                    float dist = cell.DistanceTo(colonyCenter);
+                    float score = fertility * 100f - dist;
+                    allFertile.Add((cell, score));
+                }
+
+                candidates = allFertile
+                    .OrderByDescending(x => x.score)
+                    .Take(size)
+                    .Select(x => x.cell)
+                    .ToList();
+
+                // Update anchor info to reflect where we actually placed
+                if (candidates.Count > 0)
+                {
+                    int cx = (int)candidates.Average(c => c.x);
+                    int cz = (int)candidates.Average(c => c.z);
+                    anchorInfo = ($"FertileRegion", cx, cz);
+                }
+            }
+            else
+            {
+                // Sort by fertility descending to prefer rich soil, then re-take size
+                candidates = candidates
+                    .OrderByDescending(c => c.GetFertility(map))
+                    .Take(size)
+                    .ToList();
+            }
 
             if (candidates.Count == 0)
             {
                 throw new InvalidOperationException(
-                    $"EstablishFarm: No fertile soil found near {near} " +
-                    $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})");
+                    $"EstablishFarm: No fertile soil found on map. This biome may not support farming.");
             }
 
             var zone = new Zone_Growing(map.zoneManager);
