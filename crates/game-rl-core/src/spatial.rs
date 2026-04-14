@@ -77,6 +77,7 @@ impl SpatialIntent {
         "EstablishStorage",
         "DesignateMiningNear",
         "DesignateClearNear",
+        "DefendColony",
     ];
 
     /// Check if an action type name is a spatial intent
@@ -149,7 +150,7 @@ mod tests {
     fn test_spatial_intent_names() {
         assert_eq!(
             SpatialIntent::VARIANTS,
-            &["PlaceBuildingNear", "EstablishFarm", "EstablishStorage", "DesignateMiningNear", "DesignateClearNear"]
+            &["PlaceBuildingNear", "EstablishFarm", "EstablishStorage", "DesignateMiningNear", "DesignateClearNear", "DefendColony"]
         );
     }
 }

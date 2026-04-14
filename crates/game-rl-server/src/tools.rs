@@ -123,6 +123,9 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "  {\"Action\": {\"Type\": \"DesignateMiningNear\", \"Near\": \"MapCenter\", \"Count\": 10}}\n",
                 "  {\"Action\": {\"Type\": \"DesignateClearNear\", \"Near\": \"Stockpile\", \"Radius\": 15}}\n",
                 "\n",
+                "Combat (when UnderAttack alert fires — check ValidActions):\n",
+                "  {\"Action\": {\"Type\": \"DefendColony\"}}\n",
+                "\n",
                 "Trade (when traders are present — check ValidActions):\n",
                 "  {\"Action\": {\"Type\": \"ListTraderGoods\"}}\n",
                 "  {\"Action\": {\"Type\": \"BuyFromTrader\", \"Item\": \"MealSurvivalPack\", \"Count\": 5}}\n",
@@ -145,7 +148,7 @@ pub fn list_tools() -> Vec<ToolDef> {
                         "properties": {
                             "Type": {
                                 "type": "string",
-                                "description": "Action type name (PascalCase). Spatial: PlaceBuildingNear, EstablishFarm, EstablishStorage, DesignateMiningNear, DesignateClearNear. Trade: ListTraderGoods, BuyFromTrader, SellToTrader. Other: Draft, Undraft, Move, SetWorkPriority, Attack, SetSpeed, DesignateHunt, Rescue, TendTo, Equip, SaveCheckpoint, LoadCheckpoint, Unpause, AddBill, UnforbidByType"
+                                "description": "Action type name (PascalCase). Spatial: PlaceBuildingNear, EstablishFarm, EstablishStorage, DesignateMiningNear, DesignateClearNear. Combat: DefendColony, Draft, Attack. Trade: ListTraderGoods, BuyFromTrader, SellToTrader. Other: Undraft, Move, SetWorkPriority, SetSpeed, DesignateHunt, Rescue, TendTo, Equip, AddBill, UnforbidByType, SaveCheckpoint, Unpause"
                             }
                         },
                         "required": ["Type"]

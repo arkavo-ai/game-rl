@@ -325,6 +325,8 @@ namespace RimWorld.GameRL.State
 
         public string? SubType { get; set; }
 
+        public string? Faction { get; set; }
+
         public int Severity { get; set; }
 
         public int Count { get; set; }
@@ -1045,9 +1047,27 @@ namespace RimWorld.GameRL.State
 
         private List<AlertState> ExtractAlerts()
         {
-            return ExtractAlertsWithSeverity()
+            var alerts = ExtractAlertsWithSeverity()
                 .Select(a => new AlertState { Label = a.Label, Severity = a.Severity })
                 .ToList();
+
+            // Synthetic "UnderAttack" Severity 3 alert when hostiles are on the map
+            try
+            {
+                var map = Find.CurrentMap;
+                if (map != null)
+                {
+                    var hostileCount = map.mapPawns.AllPawnsSpawned
+                        .Count(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer));
+                    if (hostileCount > 0 && !alerts.Any(a => a.Label == "UnderAttack"))
+                    {
+                        alerts.Insert(0, new AlertState { Label = "UnderAttack", Severity = 3 });
+                    }
+                }
+            }
+            catch { }
+
+            return alerts;
         }
 
         /// <summary>
@@ -1161,9 +1181,21 @@ namespace RimWorld.GameRL.State
 
                 if (raiders.Count > 0)
                 {
+                    // Identify faction(s)
+                    var factions = raiders
+                        .Where(p => p.Faction != null)
+                        .Select(p => p.Faction.Name)
+                        .Distinct()
+                        .ToList();
+                    string factionStr = factions.Count > 0 ? string.Join(", ", factions) : "Unknown";
+
                     threats.Add(new ThreatInfo
                     {
                         Type = "hostile_pawns",
+                        SubType = raiders.Any(p => p.RaceProps?.IsMechanoid == true) ? "Mechanoid"
+                            : raiders.Any(p => p.RaceProps?.Animal == true) ? "Animal"
+                            : "Humanlike",
+                        Faction = factionStr,
                         Severity = raiders.Count > 10 ? 3 : raiders.Count > 5 ? 2 : 1,
                         Count = raiders.Count,
                         Position = Centroid(raiders)
@@ -1176,6 +1208,7 @@ namespace RimWorld.GameRL.State
                     {
                         Type = "manhunter",
                         SubType = manhunters.First().def?.defName,
+                        Faction = "Wildlife",
                         Severity = manhunters.Count > 5 ? 3 : manhunters.Count > 2 ? 2 : 1,
                         Count = manhunters.Count,
                         Position = Centroid(manhunters)
@@ -1436,18 +1469,23 @@ namespace RimWorld.GameRL.State
                 valid.Add("Equip");
             }
 
+            // Combat: DefendColony (auto-draft + position) when hostiles present
             // Attack requires drafted pawn AND hostile targets
+            try
+            {
+                var hasHostiles = map.mapPawns.AllPawnsSpawned
+                    .Any(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer));
+                if (hasHostiles)
+                {
+                    valid.Add("DefendColony");
+                    if (hasDraftedColonist) valid.Add("Attack");
+                }
+            }
+            catch { }
+
+            // Arrest requires drafted pawn AND non-hostile humanlike non-colonist on map
             if (hasDraftedColonist)
             {
-                try
-                {
-                    var hasHostiles = map.mapPawns.AllPawnsSpawned
-                        .Any(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer));
-                    if (hasHostiles) valid.Add("Attack");
-                }
-                catch { }
-
-                // Arrest requires drafted pawn AND non-hostile humanlike non-colonist on map
                 try
                 {
                     var hasArrestable = map.mapPawns.AllPawnsSpawned

@@ -495,6 +495,92 @@ namespace RimWorld.GameRL.Actions
             return BuildSpatialResult(desc, (uint)designated, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
+        [GameRLAction("DefendColony", Description = "Auto-draft all able colonists and position them between threats and the colony center. Use when UnderAttack alert fires.")]
+        public static string DefendColony()
+        {
+            var map = Find.CurrentMap;
+            if (map == null)
+                throw new InvalidOperationException("DefendColony: No map loaded");
+
+            // Find hostiles
+            var hostiles = map.mapPawns.AllPawnsSpawned
+                .Where(p => p != null && !p.Destroyed && p.Spawned && p.HostileTo(Faction.OfPlayer))
+                .ToList();
+
+            if (hostiles.Count == 0)
+                throw new InvalidOperationException("DefendColony: No hostile threats detected");
+
+            // Threat centroid
+            int tx = (int)hostiles.Average(p => p.Position.x);
+            int tz = (int)hostiles.Average(p => p.Position.z);
+            var threatCenter = new IntVec3(tx, 0, tz);
+
+            // Colony center (average of colonist buildings)
+            var colonyCenter = map.Center;
+            var buildings = map.listerBuildings.allBuildingsColonist;
+            if (buildings.Count > 0)
+            {
+                int bx = (int)buildings.Average(b => b.Position.x);
+                int bz = (int)buildings.Average(b => b.Position.z);
+                colonyCenter = new IntVec3(bx, 0, bz);
+            }
+
+            // Defensive position: 1/3 of the way from colony center toward threats
+            int dx = colonyCenter.x + (threatCenter.x - colonyCenter.x) / 3;
+            int dz = colonyCenter.z + (threatCenter.z - colonyCenter.z) / 3;
+            var defenseLine = new IntVec3(dx, 0, dz);
+
+            // Draft all able colonists and move them to defensive positions
+            var colonists = map.mapPawns.FreeColonists
+                .Where(p => p != null && !p.Destroyed && !p.Downed && !p.InMentalState)
+                .ToList();
+
+            int drafted = 0;
+            var positions = new List<string>();
+
+            foreach (var pawn in colonists)
+            {
+                // Draft if not already
+                if (pawn.drafter != null && !pawn.Drafted)
+                {
+                    pawn.drafter.Drafted = true;
+                }
+
+                // Find a standable cell near the defense line for each pawn
+                foreach (var cell in GenRadial.RadialCellsAround(defenseLine, 8f + drafted, true))
+                {
+                    if (!cell.InBounds(map)) continue;
+                    if (!cell.Standable(map)) continue;
+                    if (!map.reachability.CanReach(pawn.Position, cell, Verse.AI.PathEndMode.OnCell,
+                        TraverseParms.For(pawn)))
+                        continue;
+
+                    var job = JobMaker.MakeJob(JobDefOf.Goto, cell);
+                    job.playerForced = true;
+                    pawn.jobs.TryTakeOrderedJob(job);
+                    positions.Add($"{pawn.LabelShort}→({cell.x},{cell.z})");
+                    drafted++;
+                    break;
+                }
+            }
+
+            if (drafted == 0)
+                throw new InvalidOperationException("DefendColony: No colonists available to defend");
+
+            // Identify threat factions for description
+            var factions = hostiles
+                .Where(p => p.Faction != null)
+                .Select(p => p.Faction.Name)
+                .Distinct()
+                .ToList();
+            string threatDesc = factions.Count > 0 ? string.Join(", ", factions) : $"{hostiles.Count} hostiles";
+
+            var desc = $"Defending against {threatDesc}: drafted {drafted} colonists to defensive positions between colony ({colonyCenter.x},{colonyCenter.z}) and threats ({tx},{tz}). {string.Join(", ", positions)}";
+            Log.Message($"[GameRL] {desc}");
+
+            return BuildSpatialResult(desc, (uint)drafted, "DefenseLine", dx, dz);
+        }
+
         /// <summary>
         /// Build a JSON result matching the ResolvedPlacement format expected by the Rust bridge
         /// </summary>
