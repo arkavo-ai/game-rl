@@ -90,7 +90,7 @@ pub async fn reader_task<R: AsyncReader>(
                                     // cascade where every response is consumed by the wrong channel.
                                     _ => {
                                         // Drain stale channels first
-                                        while pending.front().map_or(false, |tx| tx.is_closed()) {
+                                        while pending.front().is_some_and(|tx| tx.is_closed()) {
                                             pending.pop_front();
                                             warn!("Skipping stale pending response channel (receiver dropped)");
                                         }

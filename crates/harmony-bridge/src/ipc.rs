@@ -537,7 +537,7 @@ impl GameEnvironment for HarmonyBridge {
 
     async fn reset(&mut self, seed: Option<u64>, scenario: Option<String>) -> Result<Observation> {
         // Determine if this reset will tear down the game (checkpoint load or new colony)
-        let will_teardown = scenario.as_ref().map_or(false, |s| {
+        let will_teardown = scenario.as_ref().is_some_and(|s| {
             s.starts_with("new") || {
                 // Check if it matches a save file name (LoadCheckpoint path)
                 // Any non-empty scenario that isn't "new" attempts a checkpoint load

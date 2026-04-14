@@ -500,11 +500,9 @@ fn fuzzy_match_action(
     for action in actions {
         let name_lower = action.name.to_lowercase();
         let dist = edit_distance(&input_lower, &name_lower);
-        let threshold = (action.name.len() / 3).max(2).min(3);
-        if dist <= threshold {
-            if best.is_none() || dist < best.unwrap().1 {
-                best = Some((&action.name, dist));
-            }
+        let threshold = (action.name.len() / 3).clamp(2, 3);
+        if dist <= threshold && (best.is_none() || dist < best.unwrap().1) {
+            best = Some((&action.name, dist));
         }
     }
 
@@ -517,11 +515,11 @@ fn edit_distance(a: &str, b: &str) -> usize {
     let b: Vec<char> = b.chars().collect();
     let (m, n) = (a.len(), b.len());
     let mut dp = vec![vec![0usize; n + 1]; m + 1];
-    for i in 0..=m {
-        dp[i][0] = i;
+    for (i, row) in dp.iter_mut().enumerate().take(m + 1) {
+        row[0] = i;
     }
-    for j in 0..=n {
-        dp[0][j] = j;
+    for (j, val) in dp[0].iter_mut().enumerate().take(n + 1) {
+        *val = j;
     }
     for i in 1..=m {
         for j in 1..=n {
@@ -999,8 +997,8 @@ fn strip_noise(value: &mut serde_json::Value) {
                 .iter()
                 .filter(|(_, v)| {
                     v.is_null()
-                        || v.as_array().map_or(false, |a| a.is_empty())
-                        || v.as_object().map_or(false, |o| o.is_empty())
+                        || v.as_array().is_some_and(|a| a.is_empty())
+                        || v.as_object().is_some_and(|o| o.is_empty())
                 })
                 .map(|(k, _)| k.clone())
                 .collect();
@@ -1091,7 +1089,7 @@ fn strip_step_wrapper(obj: &mut serde_json::Map<String, serde_json::Value>) {
     if obj
         .get("RewardComponents")
         .and_then(|v| v.as_object())
-        .map_or(false, |o| o.is_empty())
+        .is_some_and(|o| o.is_empty())
     {
         obj.remove("RewardComponents");
     }
@@ -1107,14 +1105,14 @@ fn strip_step_wrapper(obj: &mut serde_json::Map<String, serde_json::Value>) {
     if obj
         .get("FrameIds")
         .and_then(|v| v.as_object())
-        .map_or(false, |o| o.is_empty())
+        .is_some_and(|o| o.is_empty())
     {
         obj.remove("FrameIds");
     }
     if obj
         .get("Events")
         .and_then(|v| v.as_array())
-        .map_or(false, |a| a.is_empty())
+        .is_some_and(|a| a.is_empty())
     {
         obj.remove("Events");
     }

@@ -266,11 +266,16 @@ namespace RimWorld.GameRL
                 _commandExecutor?.Reset(msg.Seed, msg.Scenario);
 
                 // If a checkpoint load was triggered, the game is tearing down.
-                // Don't try to extract observations — the connection will be lost.
+                // Send a quick "Restarting" response so the Rust side doesn't wait 120s.
                 if (GameActions.LoadRequested)
                 {
                     GameActions.LoadRequested = false;
-                    Log.Message("[GameRL] Reset triggered load — connection will be lost during reload");
+                    Log.Message("[GameRL] Reset triggered load — sending Restarting status");
+                    _bridge?.SendResetComplete(new Dictionary<string, object>
+                    {
+                        ["Status"] = "Restarting",
+                        ["Message"] = "Game is restarting after reset. Poll with observe tool until ready."
+                    });
                     return;
                 }
 
