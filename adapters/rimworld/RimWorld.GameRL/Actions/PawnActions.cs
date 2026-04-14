@@ -126,6 +126,10 @@ namespace RimWorld.GameRL.Actions
                 Log.Message("[GameRL] Enabled manual work priorities");
             }
 
+            if (pawn.WorkTypeIsDisabled(workDef))
+                throw new InvalidOperationException(
+                    $"SetWorkPriority: {pawn.LabelShort} is incapable of {workType} (disabled by backstory/traits)");
+
             var oldPriority = pawn.workSettings.GetPriority(workDef);
             pawn.workSettings.SetPriority(workDef, priority);
             var newPriority = pawn.workSettings.GetPriority(workDef);
