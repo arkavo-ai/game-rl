@@ -15,17 +15,50 @@ namespace RimWorld.GameRL.Actions
     public static class SpatialActions
     {
         /// <summary>
-        /// Resolve an anchor string to a map position.
-        /// Resolution order: entity ID → zone label → type name (nearest) → MapCenter.
+        /// Resolve an anchor string to a map position (spec draft-02 REQ-SPA-01/03).
+        /// Resolution order: landmark (ColonyCenter/MapCenter/Region_*/FertileCluster_*)
+        /// → coordinates "(x,z)" → entity ID → zone label → type name (nearest to the
+        /// colony centroid — never the map center) → loud error listing alternatives.
         /// </summary>
         private static IntVec3 ResolveAnchor(string near, Map map)
         {
             if (string.IsNullOrEmpty(near))
                 throw new InvalidOperationException("Near parameter is required");
 
-            // Special: MapCenter
+            // Landmarks: centroids and compass regions
             if (near.Equals("MapCenter", StringComparison.OrdinalIgnoreCase))
                 return map.Center;
+            if (near.Equals("ColonyCenter", StringComparison.OrdinalIgnoreCase)
+                || near.Equals("AgentCenter", StringComparison.OrdinalIgnoreCase))
+                return SpatialAnchors.GetColonyCenter(map);
+            if (near.StartsWith("Region_", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var region in SpatialAnchors.GetRegionCentroids(map))
+                {
+                    if (region.Key.Equals(near, StringComparison.OrdinalIgnoreCase))
+                        return region.Value;
+                }
+            }
+            if (near.StartsWith("FertileCluster_", StringComparison.OrdinalIgnoreCase))
+            {
+                foreach (var cluster in SpatialAnchors.GetFertileClusters(map))
+                {
+                    if (cluster.Id.Equals(near, StringComparison.OrdinalIgnoreCase))
+                        return cluster.Center;
+                }
+            }
+
+            // Coordinate escape hatch: "(x,z)" or "x,z"
+            var coordText = near.Trim('(', ')', ' ');
+            var parts = coordText.Split(',');
+            if (parts.Length == 2
+                && int.TryParse(parts[0].Trim(), out int px)
+                && int.TryParse(parts[1].Trim(), out int pz))
+            {
+                return new IntVec3(
+                    Math.Max(0, Math.Min(map.Size.x - 1, px)), 0,
+                    Math.Max(0, Math.Min(map.Size.z - 1, pz)));
+            }
 
             // 1. Try exact entity ID match (ThingID like "Stockpile_4821" or "Building_123")
             var thing = map.listerThings.AllThings
@@ -49,11 +82,13 @@ namespace RimWorld.GameRL.Actions
                 }
             }
 
-            // 3. Try type name match — find nearest colonist building of that type
+            // 3. Try type name match — find the instance nearest the colony
+            // centroid (REQ-SPA-03: never disambiguate by map center)
+            var referencePoint = SpatialAnchors.GetColonyCenter(map);
             var byType = map.listerBuildings.allBuildingsColonist
                 .Where(b => b.def.defName.Equals(near, StringComparison.OrdinalIgnoreCase)
                     || b.def.label != null && b.def.label.Equals(near, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(b => b.Position.DistanceTo(map.Center))
+                .OrderBy(b => b.Position.DistanceTo(referencePoint))
                 .FirstOrDefault();
             if (byType != null)
                 return byType.Position;
@@ -85,10 +120,10 @@ namespace RimWorld.GameRL.Actions
                 return new IntVec3(cx, 0, cz);
             }
 
-            // 4. Try as a ThingDef type match — find any thing of that def on map
+            // 4. Try as a ThingDef type match — nearest to the colony centroid
             var anyThing = map.listerThings.AllThings
                 .Where(t => t.def.defName.Equals(near, StringComparison.OrdinalIgnoreCase))
-                .OrderBy(t => t.Position.DistanceTo(map.Center))
+                .OrderBy(t => t.Position.DistanceTo(referencePoint))
                 .FirstOrDefault();
             if (anyThing != null)
                 return anyThing.Position;
@@ -96,7 +131,7 @@ namespace RimWorld.GameRL.Actions
             throw new InvalidOperationException(
                 $"Cannot resolve anchor '{near}'. Provide an entity ID (e.g. 'Building_123'), " +
                 $"zone name, building type (e.g. 'CookStove'), zone type ('Stockpile', 'Farm'), " +
-                $"or 'MapCenter'.");
+                $"coordinates '(x,z)', or a landmark. Alternatives: {SpatialAnchors.DescribeAlternatives(map)}.");
         }
 
         /// <summary>
@@ -252,14 +287,15 @@ namespace RimWorld.GameRL.Actions
             var desc = $"Placed {placed.Count} {buildingDefName} near {near} (resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}) at {string.Join(", ", placed)}";
             Log.Message($"[GameRL] {desc}");
 
-            return BuildSpatialResult(desc, (uint)placed.Count, anchorInfo.id, anchorInfo.x, anchorInfo.z);
+            return BuildSpatialResult(desc, (uint)placed.Count, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
-        [GameRLAction("EstablishFarm", Description = "Create a growing zone on fertile soil near a landmark. Crop: Rice, Potato, Corn, Healroot, Cotton, Haygrass, Strawberry. Size: Small/Medium/Large.")]
+        [GameRLAction("EstablishFarm", Description = "Create a growing zone on fertile soil near a landmark. Crop: Rice, Potato, Corn, Healroot, Cotton, Haygrass, Strawberry. Size: Small/Medium/Large. If the anchor area is barren the action fails and lists fertile alternatives; set AllowFallback=true to relocate automatically (relocation is reported).")]
         public static string EstablishFarm(
             [GameRLParam("Near")] string near,
             [GameRLParam("Crop")] string plantDefName = null,
-            [GameRLParam("Size")] string sizeStr = null)
+            [GameRLParam("Size")] string sizeStr = null,
+            [GameRLParam("AllowFallback")] bool allowFallback = false)
         {
             int size = ResolveSize(sizeStr, defaultSize: 25);
 
@@ -269,13 +305,10 @@ namespace RimWorld.GameRL.Actions
 
             var anchor = ResolveAnchor(near, map);
             var anchorInfo = DescribeAnchor(near, anchor, map);
+            bool fallbackApplied = false;
 
-            // Find fertile cells — anchor is a preference, not a hard constraint.
-            // Strategy: search near anchor first, but if barren (mountains, rock),
-            // find the best fertile region on the map closest to colony activity.
+            // Pass 1: search outward from the requested anchor
             var candidates = new List<IntVec3>();
-
-            // Pass 1: search outward from anchor
             foreach (var cell in GenRadial.RadialCellsAround(anchor, 40f, true))
             {
                 if (candidates.Count >= size * 2) break;
@@ -286,22 +319,36 @@ namespace RimWorld.GameRL.Actions
                 candidates.Add(cell);
             }
 
-            // Pass 2: if anchor area is barren, find best fertile region on map
-            // Re-anchor to the densest fertile area closest to colony buildings
             if (candidates.Count < size)
             {
-                candidates.Clear();
-                // Find colony center (average of all colonist buildings, or map center)
-                var colonyCenter = map.Center;
-                var buildings = map.listerBuildings.allBuildingsColonist;
-                if (buildings.Count > 0)
+                // REQ-SPA-02: never relocate silently. Without explicit opt-in,
+                // fail loudly and tell the agent where farming IS feasible.
+                if (!allowFallback)
                 {
-                    int bx = (int)buildings.Average(b => b.Position.x);
-                    int bz = (int)buildings.Average(b => b.Position.z);
-                    colonyCenter = new IntVec3(bx, 0, bz);
+                    var clusters = SpatialAnchors.GetFertileClusters(map);
+                    string alts;
+                    if (clusters.Count == 0)
+                    {
+                        alts = "none — no fertile soil on this map";
+                    }
+                    else
+                    {
+                        alts = string.Join("; ", clusters.Take(3).Select(c =>
+                            string.Format("{0} at ({1},{2}) — {3} cells, fertility {4:F1}",
+                                c.Id, c.Center.x, c.Center.z, c.CellCount, c.Fertility)).ToArray());
+                    }
+                    throw new InvalidOperationException(
+                        $"EstablishFarm near '{near}': only {candidates.Count} fertile cells within radius 40 " +
+                        $"of {anchorInfo.id} (need {size}). Alternatives: {alts}. " +
+                        $"Set AllowFallback=true to relocate automatically.");
                 }
 
-                // Scan all fertile cells, score by fertility and proximity to colony
+                // Opt-in fallback: re-anchor to the densest fertile area closest
+                // to colony activity, and AUDIT the relocation (REQ-SPA-06).
+                fallbackApplied = true;
+                candidates.Clear();
+                var colonyCenter = SpatialAnchors.GetColonyCenter(map);
+
                 var allFertile = new List<(IntVec3 cell, float score)>();
                 foreach (var cell in map.AllCells)
                 {
@@ -357,10 +404,11 @@ namespace RimWorld.GameRL.Actions
 
             float avgFertility = candidates.Average(c => c.GetFertility(map));
             var desc = $"Established farm ({candidates.Count} cells, avg fertility {avgFertility:F1}) near {near} " +
-                       $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})";
+                       $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})" +
+                       (fallbackApplied ? $" — FALLBACK from requested '{near}'" : "");
             Log.Message($"[GameRL] {desc}");
 
-            return BuildSpatialResult(desc, (uint)candidates.Count, anchorInfo.id, anchorInfo.x, anchorInfo.z);
+            return BuildSpatialResult(desc, (uint)candidates.Count, near, anchorInfo.id, anchorInfo.x, anchorInfo.z, fallbackApplied);
         }
 
         [GameRLAction("EstablishStorage", Description = "Create a stockpile zone near a landmark. Size: Small/Medium/Large or a number of cells.")]
@@ -408,7 +456,7 @@ namespace RimWorld.GameRL.Actions
                        $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})";
             Log.Message($"[GameRL] {desc}");
 
-            return BuildSpatialResult(desc, (uint)candidates.Count, anchorInfo.id, anchorInfo.x, anchorInfo.z);
+            return BuildSpatialResult(desc, (uint)candidates.Count, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
         [GameRLAction("DesignateMiningNear", Description = "Designate mineable rocks near a landmark for mining")]
@@ -451,7 +499,7 @@ namespace RimWorld.GameRL.Actions
                        $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})";
             Log.Message($"[GameRL] {desc}");
 
-            return BuildSpatialResult(desc, (uint)designated, anchorInfo.id, anchorInfo.x, anchorInfo.z);
+            return BuildSpatialResult(desc, (uint)designated, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
         [GameRLAction("DesignateClearNear", Description = "Designate trees/plants for cutting near a landmark")]
@@ -492,7 +540,7 @@ namespace RimWorld.GameRL.Actions
                        $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})";
             Log.Message($"[GameRL] {desc}");
 
-            return BuildSpatialResult(desc, (uint)designated, anchorInfo.id, anchorInfo.x, anchorInfo.z);
+            return BuildSpatialResult(desc, (uint)designated, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);
         }
 
         [GameRLAction("DefendColony", Description = "Auto-draft all able colonists and position them between threats and the colony center. Use when UnderAttack alert fires.")]
@@ -578,16 +626,22 @@ namespace RimWorld.GameRL.Actions
             var desc = $"Defending against {threatDesc}: drafted {drafted} colonists to defensive positions between colony ({colonyCenter.x},{colonyCenter.z}) and threats ({tx},{tz}). {string.Join(", ", positions)}";
             Log.Message($"[GameRL] {desc}");
 
-            return BuildSpatialResult(desc, (uint)drafted, "DefenseLine", dx, dz);
+            return BuildSpatialResult(desc, (uint)drafted, "DefenseLine", "DefenseLine", dx, dz);
         }
 
         /// <summary>
-        /// Build a JSON result matching the ResolvedPlacement format expected by the Rust bridge
+        /// Build a JSON result matching the ResolvedPlacement format expected by the
+        /// Rust bridge, including the draft-02 audit fields (REQ-SPA-06):
+        /// AnchorRequested and FallbackApplied.
         /// </summary>
-        private static string BuildSpatialResult(string description, uint count, string anchorResolved, int anchorX, int anchorZ)
+        private static string BuildSpatialResult(string description, uint count,
+            string anchorRequested, string anchorResolved, int anchorX, int anchorZ,
+            bool fallbackApplied = false)
         {
             return $"{{\"Description\":\"{EscapeJson(description)}\",\"Count\":{count}," +
-                   $"\"AnchorResolved\":\"{EscapeJson(anchorResolved)}\",\"AnchorPosition\":[{anchorX},{anchorZ}]}}";
+                   $"\"AnchorRequested\":\"{EscapeJson(anchorRequested ?? "")}\"," +
+                   $"\"AnchorResolved\":\"{EscapeJson(anchorResolved)}\",\"AnchorPosition\":[{anchorX},{anchorZ}]," +
+                   $"\"FallbackApplied\":{(fallbackApplied ? "true" : "false")}}}";
         }
 
         private static string EscapeJson(string s)

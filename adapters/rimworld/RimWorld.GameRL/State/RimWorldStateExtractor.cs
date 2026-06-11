@@ -2026,8 +2026,31 @@ namespace RimWorld.GameRL.State
 
             try
             {
-                // MapCenter is always available
-                landmarks.Add(new { Name = "MapCenter", Type = "MapCenter", X = map.Center.x, Y = map.Center.z });
+                // Guaranteed minimum set (spec draft-02 REQ-SPA-04):
+                // colony centroid, map center, eight compass regions, fertile clusters.
+                var colonyCenter = Actions.SpatialAnchors.GetColonyCenter(map);
+                landmarks.Add(new { Id = "ColonyCenter", Name = "ColonyCenter", Kind = "Centroid", Type = "Centroid", X = colonyCenter.x, Y = colonyCenter.z });
+                landmarks.Add(new { Id = "MapCenter", Name = "MapCenter", Kind = "Centroid", Type = "MapCenter", X = map.Center.x, Y = map.Center.z });
+
+                foreach (var region in Actions.SpatialAnchors.GetRegionCentroids(map))
+                {
+                    landmarks.Add(new { Id = region.Key, Name = region.Key, Kind = "Region", Type = "Region", X = region.Value.x, Y = region.Value.z });
+                }
+
+                foreach (var cluster in Actions.SpatialAnchors.GetFertileClusters(map).Take(5))
+                {
+                    landmarks.Add(new
+                    {
+                        Id = cluster.Id,
+                        Name = cluster.Id,
+                        Kind = "Cluster",
+                        Type = "FertileCluster",
+                        X = cluster.Center.x,
+                        Y = cluster.Center.z,
+                        CellCount = cluster.CellCount,
+                        Fertility = cluster.Fertility
+                    });
+                }
 
                 // Named zones (stockpiles, growing zones)
                 foreach (var zone in map.zoneManager.AllZones.Take(10))
