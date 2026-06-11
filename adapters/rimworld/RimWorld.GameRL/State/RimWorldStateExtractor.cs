@@ -1526,6 +1526,8 @@ namespace RimWorld.GameRL.State
             // Intent-based spatial actions (game resolves coordinates)
             valid.Add("PlaceBuildingNear");
             valid.Add("EstablishStorage");
+            valid.Add("BuildRoom");
+            valid.Add("RenderMap");
             // Only advertise EstablishFarm if fertile soil exists
             try
             {
@@ -2052,6 +2054,22 @@ namespace RimWorld.GameRL.State
                     });
                 }
 
+                // Rooms built via BuildRoom — anchors for furnishing and expansion
+                foreach (var room in Actions.RoomRegistry.All(map))
+                {
+                    landmarks.Add(new
+                    {
+                        Id = room.Id,
+                        Name = room.Label.Length > 0 ? room.Label : room.Id,
+                        Kind = "Room",
+                        Type = "Room",
+                        X = room.Rect.CenterCell.x,
+                        Y = room.Rect.CenterCell.z,
+                        Width = room.Rect.Width,
+                        Height = room.Rect.Height
+                    });
+                }
+
                 // Named zones (stockpiles, growing zones)
                 foreach (var zone in map.zoneManager.AllZones.Take(10))
                 {
@@ -2371,6 +2389,8 @@ namespace RimWorld.GameRL.State
                     new { Type = "ModifyBill", Description = "Modify a bill's count or repeat mode", BuildingId = "EntityId", BillIndex = "int", Count = "int (optional)", RepeatForever = "bool (optional)" },
 
                     // Construction & Zones
+                    new { Type = "BuildRoom", Description = "Build a rectangular room (wall perimeter + one door, interior clear). Returns Room_N usable as an anchor and with Inside. Prefer this over wall spam.", Width = "int 4-15", Height = "int 4-15", Door = "N|S|E|W", Near = "anchor (default ColonyCenter)", Stuff = "string (optional)", Label = "string (optional)" },
+                    new { Type = "RenderMap", Description = "ASCII map viewport around an anchor with coordinate rulers (read-only). Use after building to verify layout.", Near = "anchor (default ColonyCenter)", Radius = "int 4-30 (default 16)" },
                     new { Type = "PlaceBlueprint", Description = "Place a building blueprint", Building = "string", X = "int", Y = "int", Rotation = "int (optional)", Stuff = "string (optional)" },
                     new { Type = "CreateStockpile", Description = "Create a stockpile zone", X = "int", Y = "int", Width = "int", Height = "int" },
                     new { Type = "CreateGrowingZone", Description = "Create a growing zone", X = "int", Y = "int", Width = "int", Height = "int", Plant = "string (optional)" },

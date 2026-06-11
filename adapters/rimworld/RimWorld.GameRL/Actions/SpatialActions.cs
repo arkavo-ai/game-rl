@@ -48,6 +48,11 @@ namespace RimWorld.GameRL.Actions
                 }
             }
 
+            // Rooms built via BuildRoom ("Room_1" or their label)
+            var roomAnchor = RoomRegistry.Find(near, map);
+            if (roomAnchor != null)
+                return roomAnchor.Rect.CenterCell;
+
             // Coordinate escape hatch: "(x,z)" or "x,z"
             var coordText = near.Trim('(', ')', ' ');
             var parts = coordText.Split(',');
@@ -135,6 +140,25 @@ namespace RimWorld.GameRL.Actions
         }
 
         /// <summary>
+        /// Anchor resolution for sibling action classes (ConstructionActions, MapRender)
+        /// </summary>
+        internal static IntVec3 ResolveAnchorFor(string near, Map map)
+        {
+            return ResolveAnchor(near, map);
+        }
+
+        /// <summary>
+        /// Audited spatial result for sibling action classes
+        /// </summary>
+        internal static string BuildSpatialResultFor(string description, uint count,
+            string anchorRequested, string anchorResolved, int anchorX, int anchorZ,
+            bool fallbackApplied)
+        {
+            return BuildSpatialResult(description, count, anchorRequested, anchorResolved,
+                anchorX, anchorZ, fallbackApplied);
+        }
+
+        /// <summary>
         /// Resolve a size parameter from string. Accepts "Small"/"Medium"/"Large" or an integer.
         /// </summary>
         private static int ResolveSize(string sizeStr, int defaultSize)
@@ -219,16 +243,28 @@ namespace RimWorld.GameRL.Actions
             return (resolvedId, pos.x, pos.z);
         }
 
-        [GameRLAction("PlaceBuildingNear", Description = "Place building(s) near a landmark or entity")]
+        [GameRLAction("PlaceBuildingNear", Description = "Place building(s) near a landmark or entity. Use Inside=\"Room_1\" to restrict placement to a room built with BuildRoom.")]
         public static string PlaceBuildingNear(
             [GameRLParam("Building")] string buildingDefName,
-            [GameRLParam("Near")] string near,
+            [GameRLParam("Near")] string near = null,
             [GameRLParam("Count")] int count = 1,
-            [GameRLParam("Stuff")] string stuffDefName = null)
+            [GameRLParam("Stuff")] string stuffDefName = null,
+            [GameRLParam("Inside")] string inside = null)
         {
             var map = Find.CurrentMap;
             if (map == null)
                 throw new InvalidOperationException("PlaceBuildingNear: No map loaded");
+
+            RoomRecord room = null;
+            if (!string.IsNullOrEmpty(inside))
+            {
+                room = RoomRegistry.Find(inside, map);
+                if (room == null)
+                    throw new InvalidOperationException(
+                        $"PlaceBuildingNear: Unknown room '{inside}'. Rooms: {RoomRegistry.DescribeAll(map)}");
+            }
+            if (string.IsNullOrEmpty(near))
+                near = room != null ? room.Id : "ColonyCenter";
 
             var buildingDef = DefDatabase<ThingDef>.GetNamed(buildingDefName, errorOnFail: false);
             if (buildingDef == null)
@@ -251,11 +287,30 @@ namespace RimWorld.GameRL.Actions
 
             var placed = new List<string>();
 
-            // Adaptive search: start at 15, expand to 40 if obstructed (mountains, buildings)
-            float[] searchRadii = new[] { 15f, 25f, 40f };
-            foreach (float searchRadius in searchRadii)
+            // Candidate cells: a room's interior (center-out) when Inside is
+            // given, otherwise adaptive radial search from the anchor
+            // (start at 15, expand to 40 if obstructed).
+            List<IEnumerable<IntVec3>> candidatePasses;
+            if (room != null)
             {
-                foreach (var cell in GenRadial.RadialCellsAround(anchor, searchRadius, true))
+                var interior = room.Rect.ContractedBy(1).Cells
+                    .OrderBy(c => c.DistanceToSquared(room.Rect.CenterCell))
+                    .ToList();
+                candidatePasses = new List<IEnumerable<IntVec3>> { interior };
+            }
+            else
+            {
+                candidatePasses = new List<IEnumerable<IntVec3>>
+                {
+                    GenRadial.RadialCellsAround(anchor, 15f, true),
+                    GenRadial.RadialCellsAround(anchor, 25f, true),
+                    GenRadial.RadialCellsAround(anchor, 40f, true),
+                };
+            }
+
+            foreach (var pass in candidatePasses)
+            {
+                foreach (var cell in pass)
                 {
                     if (placed.Count >= count) break;
                     if (!cell.InBounds(map)) continue;
@@ -279,6 +334,11 @@ namespace RimWorld.GameRL.Actions
 
             if (placed.Count == 0)
             {
+                if (room != null)
+                    throw new InvalidOperationException(
+                        $"PlaceBuildingNear: No space for {buildingDefName} inside {room.Id} " +
+                        $"({room.Rect.Width}x{room.Rect.Height} at {room.Rect.CenterCell.x},{room.Rect.CenterCell.z}). " +
+                        $"The room may be full — build a bigger room or place elsewhere.");
                 throw new InvalidOperationException(
                     $"PlaceBuildingNear: Could not find valid placement for {buildingDefName} near {near} " +
                     $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}). Area may be mountainous or fully built up.");
