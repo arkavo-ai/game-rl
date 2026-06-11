@@ -439,12 +439,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "game-rl-conformance"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "serde",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "game-rl-core"
 version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
  "thiserror",
+]
+
+[[package]]
+name = "game-rl-reference"
+version = "0.6.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "clap",
+ "game-rl-core",
+ "game-rl-server",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]

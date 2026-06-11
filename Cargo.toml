@@ -9,6 +9,8 @@ members = [
     "crates/harmony-bridge",
     "crates/zomboid-bridge",
     "crates/factorio-bridge",
+    "crates/game-rl-reference",
+    "crates/game-rl-conformance",
 ]
 
 [workspace.package]
@@ -60,6 +62,7 @@ game-rl-server = { path = "crates/game-rl-server" }
 game-rl-cli = { path = "crates/game-rl-cli" }
 game-rl-client = { path = "crates/game-rl-client" }
 game-bridge = { path = "crates/game-bridge" }
+game-rl-reference = { path = "crates/game-rl-reference" }
 harmony-bridge = { path = "crates/harmony-bridge" }
 zomboid-bridge = { path = "crates/zomboid-bridge" }
 factorio-bridge = { path = "crates/factorio-bridge" }

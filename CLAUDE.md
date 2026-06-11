@@ -23,8 +23,11 @@ cargo check
 # Run the harmony-bridge server (requires socket path argument)
 cargo run -p harmony-bridge -- /tmp/game-rl.sock
 
-# Run with example gridworld
-cargo run --example gridworld
+# Run the reference environment (GridColony) as an MCP server on stdio
+cargo run -p game-rl-reference -- --scenario fertile-corner --seed 42
+
+# Run the conformance suite against any Game-RL server
+cargo run -p game-rl-conformance -- --level 3 --scenario fertile-corner -- ./target/debug/game-rl-reference
 ```
 
 ### C# Build Commands (RimWorld mod)
@@ -52,6 +55,10 @@ This is a Rust workspace for multi-agent AI infrastructure in games. The project
 
 - **harmony-bridge** - IPC bridge between Rust MCP server and .NET games (via Harmony mod framework). Uses JSON over Unix sockets (named pipes on Windows).
 
+- **game-rl-reference** - GridColony, the spec draft-02 reference environment (conformance Level 3). Deterministic, headless; the `fertile-corner` scenario is a behavioral probe for spatial center bias.
+
+- **game-rl-conformance** - Runnable conformance suite. Spawns any server over stdio and verifies the draft-02 requirement checklist (C-INIT … C-BATCH).
+
 ### Key Traits
 
 ```rust
@@ -66,13 +73,15 @@ pub trait GameEnvironment: Send + Sync {
 }
 ```
 
-### Protocol Flow
+### Protocol Flow (spec draft-02)
 
 1. Client connects via MCP (stdio transport)
-2. `initialize` handshake
-3. `register_agent` with type (EntityBehavior, ColonyManager, GameMaster, etc.)
-4. Loop: `sim_step` sends action, receives observation + reward
-5. `reset` for new episodes
+2. `initialize` handshake (`serverInfo.gameRlVersion` declares the protocol dialect)
+3. `manifest` to discover capabilities, then `registerAgent` with type (Observer, Player, Entity, Controller, System, Director)
+4. Loop: `step` sends action, receives observation + reward; `observe` reads state without advancing time
+5. `reset` for new episodes; `episodeSummary` at episode boundaries
+
+The normative spec is `draft-arkavo-game-rl-02.md` in the arkavo/specifications repo (snake_case draft-00 tool names are accepted as deprecated aliases). Spatial intents follow REQ-SPA-01..07: never silently re-anchor, expose Landmarks, resolve ambiguity against the colony centroid — never the map center.
 
 ### Wire Protocols
 

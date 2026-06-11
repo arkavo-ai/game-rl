@@ -67,6 +67,7 @@ fn handle_initialize<E: GameEnvironment>(request: &Request, server: &GameRLServe
         server_info: ServerInfo {
             name: server.manifest().name.clone(),
             version: server.manifest().version.clone(),
+            game_rl_version: Some(server.manifest().game_rl_version.clone()),
         },
         instructions: Some(format!(
             "Game-RL MCP server for {}. Use registerAgent to connect, then observe/step to interact with the game. \

@@ -119,7 +119,7 @@ async fn main() -> Result<()> {
             });
         }
 
-        candidates.sort_by(|a, b| b.modified.cmp(&a.modified));
+        candidates.sort_by_key(|c| std::cmp::Reverse(c.modified));
 
         for candidate in &candidates {
             debug!(

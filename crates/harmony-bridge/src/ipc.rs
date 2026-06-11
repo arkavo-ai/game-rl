@@ -417,8 +417,11 @@ impl GameEnvironment for HarmonyBridge {
             } => Ok(ResolvedPlacement {
                 description,
                 count,
+                anchor_requested: Some(intent.near().map(|a| a.describe()).unwrap_or_default()),
                 anchor_resolved,
-                anchor_position,
+                anchor_position: anchor_position.into(),
+                positions: Vec::new(),
+                fallback_applied: false,
             }),
             GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
                 "Spatial resolution error {}: {}",
@@ -700,7 +703,7 @@ impl GameEnvironment for HarmonyBridge {
         GameManifest {
             name: self.game_name.clone(),
             version: self.game_version.clone(),
-            game_rl_version: env!("CARGO_PKG_VERSION").into(),
+            game_rl_version: game_rl_core::PROTOCOL_VERSION.into(),
             capabilities: game_rl_core::Capabilities {
                 multi_agent: caps.multi_agent,
                 max_agents: caps.max_agents,

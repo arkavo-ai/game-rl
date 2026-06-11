@@ -468,7 +468,7 @@ impl GameEnvironment for ZomboidBridge {
         GameManifest {
             name: self.game_name.clone(),
             version: self.game_version.clone(),
-            game_rl_version: env!("CARGO_PKG_VERSION").into(),
+            game_rl_version: game_rl_core::PROTOCOL_VERSION.into(),
             capabilities: game_rl_core::Capabilities {
                 multi_agent: caps.multi_agent,
                 max_agents: caps.max_agents,

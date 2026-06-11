@@ -150,12 +150,15 @@ pub struct ResourcesCapability {
     pub list_changed: bool,
 }
 
-/// Server info (MCP spec: name and version only)
+/// Server info (MCP spec: name and version; gameRlVersion declares Game-RL
+/// protocol compliance per spec draft-02 §3.1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_rl_version: Option<String>,
 }
 
 /// MCP JSON-RPC notification (no id, no response expected)

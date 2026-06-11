@@ -1,0 +1,133 @@
+{
+  "GameRlConformance": {
+    "Checks": [
+      {
+        "detail": "protocolVersion=2025-11-25, gameRlVersion=2.0.0-draft02",
+        "id": "C-INIT",
+        "level": 1,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "13 tools, L1 set complete",
+        "id": "C-TOOLS",
+        "level": 1,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "GridColony (gameRl 2.0.0-draft02)",
+        "id": "C-MANIFEST",
+        "level": 1,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "register → reset → observe → step OK",
+        "id": "C-LIFECYCLE",
+        "level": 1,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "failed actions error loudly",
+        "id": "C-ERR-LOUD",
+        "level": 1,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "seeded reset reproducible (sha256:721a0c998d8f477e)",
+        "id": "C-DET-RESET",
+        "level": 1,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "3-step hash sequence reproducible (REQ-DET-02)",
+        "id": "C-DET-SEQ",
+        "level": 2,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "TotalReward=0.36, StepCount=3",
+        "id": "C-EPISODE",
+        "level": 2,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "8 valid action types exposed (REQ-OBS-01)",
+        "id": "C-VALIDACTIONS",
+        "level": 2,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "1 alerts with Severity (REQ-OBS-02)",
+        "id": "C-ALERTS",
+        "level": 2,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "named, offset, and coordinate anchors accepted",
+        "id": "C-SPA-GRAMMAR",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "15 landmarks incl. centroids + 8 compass regions (REQ-SPA-04)",
+        "id": "C-SPA-LANDMARKS",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "no silent relocation; opt-in fallback audited",
+        "id": "C-SPA-INTEGRITY",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "ResolvedPlacement carries full audit trail (REQ-SPA-06)",
+        "id": "C-SPA-AUDIT",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "profile \"none\" configured",
+        "id": "C-STREAMS",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "trajectory replay reproduces state hash",
+        "id": "C-TRAJECTORY",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      },
+      {
+        "detail": "2-agent barrier batch step OK",
+        "id": "C-BATCH",
+        "level": 3,
+        "pass": true,
+        "skipped": false
+      }
+    ],
+    "LevelAchieved": 3,
+    "Scenario": "fertile-corner",
+    "Seed": 42,
+    "ServerCmd": [
+      "./target/debug/game-rl-reference"
+    ],
+    "SpecVersion": "2.0.0-draft02",
+    "TargetLevel": 3
+  }
+}

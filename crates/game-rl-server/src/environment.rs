@@ -72,11 +72,12 @@ pub trait GameEnvironment: Send + Sync + 'static {
         ))
     }
 
-    /// Resolve a spatial intent into concrete placements
+    /// Resolve a spatial intent into concrete placements — DRY RUN (draft-02 REQ-SPA-05)
     ///
     /// Intent-based actions (PlaceBuildingNear, EstablishFarm, etc.) express what to place
-    /// and where relative to an anchor, without specifying coordinates. The game resolves
-    /// the intent using its own spatial APIs and executes the placements.
+    /// and where relative to an anchor, without specifying coordinates. This method returns
+    /// the placement that WOULD result, without mutating game state; the mutating path is
+    /// the same intent submitted via `step`.
     ///
     /// Default: returns error (game does not support spatial intent).
     /// Games that set `capabilities.spatial_intent = true` must implement this.

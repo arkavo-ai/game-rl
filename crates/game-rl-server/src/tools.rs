@@ -241,6 +241,15 @@ pub fn list_tools() -> Vec<ToolDef> {
             annotations: read_only.clone(),
         },
         ToolDef {
+            name: "manifest".into(),
+            description: "Get environment capabilities: game name, Game-RL protocol version, supported agent types, scenarios, reward components, and stream profiles. Call this first to discover what the game supports.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "additionalProperties": false
+            }),
+            annotations: read_only.clone(),
+        },
+        ToolDef {
             name: "stateHash".into(),
             description: "Get hash of current game state for debugging".into(),
             input_schema: serde_json::json!({
@@ -257,6 +266,79 @@ pub fn list_tools() -> Vec<ToolDef> {
                 "additionalProperties": false
             }),
             annotations: read_only.clone(),
+        },
+        ToolDef {
+            name: "resolveSpatial".into(),
+            description: concat!(
+                "Dry-run a spatial intent: returns the placement that WOULD result, without mutating game state.\n",
+                "Use this to compare candidate anchors before committing via step.\n",
+                "Example: {\"Intent\": {\"Type\": \"EstablishFarm\", \"Near\": \"Region_NE\", \"Size\": 25}}",
+            ).into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "Intent": {
+                        "type": "object",
+                        "description": "A spatial intent action object (PlaceBuildingNear, EstablishFarm, EstablishStorage, DesignateMiningNear, DesignateClearNear) with a \"Type\" field and a \"Near\" anchor.",
+                        "properties": { "Type": { "type": "string" } },
+                        "required": ["Type"]
+                    }
+                },
+                "required": ["Intent"]
+            }),
+            annotations: read_only.clone(),
+        },
+        ToolDef {
+            name: "saveTrajectory".into(),
+            description: "Save the episode's action trajectory to a file for replay/offline training.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "Path": { "type": "string", "description": "Output file path" }
+                },
+                "required": ["Path"]
+            }),
+            annotations: mutating.clone(),
+        },
+        ToolDef {
+            name: "loadTrajectory".into(),
+            description: "Load and replay a saved trajectory, restoring deterministic state.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "Path": { "type": "string", "description": "Trajectory file path" }
+                },
+                "required": ["Path"]
+            }),
+            annotations: destructive.clone(),
+        },
+        ToolDef {
+            name: "batchStep".into(),
+            description: "Submit actions for several agents in one call. SyncMode: barrier (default) or sequential.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "Steps": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "AgentId": { "type": "string" },
+                                "Action": { "type": "object" },
+                                "Ticks": { "type": "integer", "minimum": 0 }
+                            },
+                            "required": ["AgentId", "Action"]
+                        }
+                    },
+                    "SyncMode": {
+                        "type": "string",
+                        "enum": ["barrier", "sequential", "async"],
+                        "default": "barrier"
+                    }
+                },
+                "required": ["Steps"]
+            }),
+            annotations: mutating.clone(),
         },
         ToolDef {
             name: "configureStreams".into(),
@@ -343,6 +425,11 @@ pub async fn handle_tool_call<E: GameEnvironment>(
         "step" | "sim_step" => handle_step(params, environment, registry).await,
         "observe" => handle_observe(params, environment, registry).await,
         "reset" => handle_reset(params, environment).await,
+        "manifest" | "getManifest" | "get_manifest" => handle_manifest(environment).await,
+        "resolveSpatial" | "resolve_spatial" => handle_resolve_spatial(params, environment).await,
+        "saveTrajectory" | "save_trajectory" => handle_save_trajectory(params, environment).await,
+        "loadTrajectory" | "load_trajectory" => handle_load_trajectory(params, environment).await,
+        "batchStep" | "batch_step" => handle_batch_step(params, environment, registry).await,
         "stateHash" | "get_state_hash" => handle_state_hash(environment).await,
         "episodeSummary" | "episode_summary" => handle_episode_summary(environment).await,
         "configureStreams" | "configure_streams" => {
@@ -1250,7 +1337,96 @@ async fn handle_state_hash<E: GameEnvironment>(
     let mut env = environment.write().await;
     let hash = env.state_hash().await?;
 
-    Ok(serde_json::json!({ "hash": hash }))
+    Ok(serde_json::json!({ "Hash": hash }))
+}
+
+async fn handle_manifest<E: GameEnvironment>(
+    environment: &Arc<RwLock<E>>,
+) -> Result<serde_json::Value> {
+    let env = environment.read().await;
+    Ok(serde_json::to_value(env.manifest())?)
+}
+
+async fn handle_resolve_spatial<E: GameEnvironment>(
+    params: serde_json::Value,
+    environment: &Arc<RwLock<E>>,
+) -> Result<serde_json::Value> {
+    // Accept {"Intent": {...}} or a bare intent object
+    let intent_value = params.get("Intent").cloned().unwrap_or(params);
+    let intent: SpatialIntent = serde_json::from_value(intent_value).map_err(|e| {
+        GameRLError::ProtocolError(format!(
+            "Invalid spatial intent: {}. Example: {{\"Intent\": {{\"Type\": \"EstablishFarm\", \"Near\": \"Region_NE\"}}}}",
+            e
+        ))
+    })?;
+
+    let mut env = environment.write().await;
+    let placement = env.resolve_spatial(intent).await?;
+    Ok(serde_json::to_value(placement)?)
+}
+
+async fn handle_save_trajectory<E: GameEnvironment>(
+    params: serde_json::Value,
+    environment: &Arc<RwLock<E>>,
+) -> Result<serde_json::Value> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Params {
+        path: String,
+    }
+    let p: Params = serde_json::from_value(params)?;
+    let env = environment.read().await;
+    env.save_trajectory(&p.path).await?;
+    Ok(serde_json::json!({ "Saved": p.path }))
+}
+
+async fn handle_load_trajectory<E: GameEnvironment>(
+    params: serde_json::Value,
+    environment: &Arc<RwLock<E>>,
+) -> Result<serde_json::Value> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Params {
+        path: String,
+    }
+    let p: Params = serde_json::from_value(params)?;
+    let mut env = environment.write().await;
+    env.load_trajectory(&p.path).await?;
+    Ok(serde_json::json!({ "Loaded": p.path }))
+}
+
+async fn handle_batch_step<E: GameEnvironment>(
+    params: serde_json::Value,
+    environment: &Arc<RwLock<E>>,
+    registry: &Arc<RwLock<AgentRegistry>>,
+) -> Result<serde_json::Value> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "PascalCase")]
+    struct Params {
+        steps: Vec<serde_json::Value>,
+        #[serde(default)]
+        sync_mode: Option<String>,
+    }
+    let p: Params = serde_json::from_value(params)?;
+
+    if let Some(ref mode) = p.sync_mode {
+        if !matches!(mode.as_str(), "barrier" | "sequential" | "async") {
+            return Err(GameRLError::ProtocolError(format!(
+                "Invalid SyncMode \"{}\". Valid: barrier, sequential, async",
+                mode
+            )));
+        }
+    }
+
+    // In-process environments execute steps in submission order; barrier and
+    // sequential are equivalent here (the world advances per step either way).
+    let mut results = Vec::with_capacity(p.steps.len());
+    for step_params in p.steps {
+        let result = handle_step(step_params, environment, registry).await?;
+        results.push(result);
+    }
+
+    Ok(serde_json::json!({ "Results": results }))
 }
 
 async fn handle_episode_summary<E: GameEnvironment>(
@@ -1278,6 +1454,42 @@ async fn handle_configure_streams<E: GameEnvironment>(
 mod tests {
     use super::*;
     use serde_json::json;
+
+    // --- tool surface tests ---
+
+    #[test]
+    fn test_list_tools_includes_manifest() {
+        let tools = list_tools();
+        let manifest = tools
+            .iter()
+            .find(|t| t.name == "manifest")
+            .expect("manifest tool must be listed (draft-02 Level 1)");
+        assert_eq!(manifest.input_schema["type"], "object");
+        assert!(
+            manifest
+                .annotations
+                .as_ref()
+                .and_then(|a| a.read_only_hint)
+                .unwrap_or(false),
+            "manifest must be annotated read-only"
+        );
+    }
+
+    #[test]
+    fn test_list_tools_level1_surface_camel_case() {
+        let tools = list_tools();
+        let names: Vec<&str> = tools.iter().map(|t| t.name.as_str()).collect();
+        for required in [
+            "manifest",
+            "registerAgent",
+            "deregisterAgent",
+            "step",
+            "observe",
+            "reset",
+        ] {
+            assert!(names.contains(&required), "missing L1 tool: {required}");
+        }
+    }
 
     // --- normalize_action tests ---
 
