@@ -308,6 +308,10 @@ namespace RimWorld.GameRL.Actions
                 };
             }
 
+            // Track WHY cells were rejected so partial placements can explain
+            // themselves (REQ-ERR-02: feedback from failures, not just successes)
+            var blockers = new Dictionary<string, int>();
+
             foreach (var pass in candidatePasses)
             {
                 foreach (var cell in pass)
@@ -316,6 +320,7 @@ namespace RimWorld.GameRL.Actions
                     if (!cell.InBounds(map)) continue;
 
                     // Try all 4 rotations
+                    bool placedHere = false;
                     foreach (var rot in new[] { Rot4.North, Rot4.East, Rot4.South, Rot4.West })
                     {
                         var report = GenConstruct.CanPlaceBlueprintAt(buildingDef, cell, rot, map, godMode: false, thing: null, stuffDef: stuffDef);
@@ -325,26 +330,48 @@ namespace RimWorld.GameRL.Actions
                             thing.SetFaction(Verse.Find.FactionManager.OfPlayer);
                             GenSpawn.Spawn(thing, cell, map, rot);
                             placed.Add($"({cell.x},{cell.z})");
+                            placedHere = true;
                             break;
                         }
+                        var reason = report.Reason;
+                        if (!string.IsNullOrEmpty(reason))
+                            blockers[reason] = blockers.TryGetValue(reason, out var n) ? n + 1 : 1;
                     }
+                    _ = placedHere;
                 }
                 if (placed.Count >= count) break; // found enough, stop expanding
             }
+
+            string blockerSummary = blockers.Count == 0
+                ? ""
+                : " Blockers: " + string.Join("; ", blockers
+                    .OrderByDescending(kv => kv.Value)
+                    .Take(2)
+                    .Select(kv => $"\"{kv.Key}\" x{kv.Value}")
+                    .ToArray()) + ".";
 
             if (placed.Count == 0)
             {
                 if (room != null)
                     throw new InvalidOperationException(
                         $"PlaceBuildingNear: No space for {buildingDefName} inside {room.Id} " +
-                        $"({room.Rect.Width}x{room.Rect.Height} at {room.Rect.CenterCell.x},{room.Rect.CenterCell.z}). " +
-                        $"The room may be full — build a bigger room or place elsewhere.");
+                        $"({room.Rect.Width}x{room.Rect.Height} at {room.Rect.CenterCell.x},{room.Rect.CenterCell.z})." +
+                        $"{blockerSummary} The room may be full — build a bigger room (BuildRoom Width/Height) or place elsewhere. Use RenderMap to inspect.");
                 throw new InvalidOperationException(
                     $"PlaceBuildingNear: Could not find valid placement for {buildingDefName} near {near} " +
-                    $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}). Area may be mountainous or fully built up.");
+                    $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}).{blockerSummary} Area may be mountainous or fully built up.");
             }
 
             var desc = $"Placed {placed.Count} {buildingDefName} near {near} (resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z}) at {string.Join(", ", placed)}";
+            if (placed.Count < count)
+            {
+                desc += $" — WARNING: only {placed.Count} of {count} requested fit" +
+                        (room != null
+                            ? $" inside {room.Id} ({room.Rect.Width}x{room.Rect.Height})"
+                            : $" within radius 40 of {anchorInfo.id}") +
+                        $".{blockerSummary}" +
+                        " Try a bigger room, another anchor, or RenderMap to find space.";
+            }
             Log.Message($"[GameRL] {desc}");
 
             return BuildSpatialResult(desc, (uint)placed.Count, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);
@@ -466,6 +493,8 @@ namespace RimWorld.GameRL.Actions
             var desc = $"Established farm ({candidates.Count} cells, avg fertility {avgFertility:F1}) near {near} " +
                        $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})" +
                        (fallbackApplied ? $" — FALLBACK from requested '{near}'" : "");
+            if (candidates.Count < size)
+                desc += $" — WARNING: only {candidates.Count} of {size} requested cells available; the map may lack contiguous fertile soil.";
             Log.Message($"[GameRL] {desc}");
 
             return BuildSpatialResult(desc, (uint)candidates.Count, near, anchorInfo.id, anchorInfo.x, anchorInfo.z, fallbackApplied);
@@ -514,6 +543,8 @@ namespace RimWorld.GameRL.Actions
 
             var desc = $"Established stockpile ({candidates.Count} cells) near {near} " +
                        $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})";
+            if (candidates.Count < size)
+                desc += $" — WARNING: only {candidates.Count} of {size} requested cells were free within radius 20. Expand later with another EstablishStorage elsewhere.";
             Log.Message($"[GameRL] {desc}");
 
             return BuildSpatialResult(desc, (uint)candidates.Count, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);
@@ -557,6 +588,8 @@ namespace RimWorld.GameRL.Actions
 
             var desc = $"Designated {designated} rocks for mining near {near} " +
                        $"(resolved to {anchorInfo.id} at {anchorInfo.x},{anchorInfo.z})";
+            if (designated < count)
+                desc += $" — WARNING: only {designated} of {count} requested; no more mineable rocks within radius 25. Try a RockCluster anchor from Landmarks.";
             Log.Message($"[GameRL] {desc}");
 
             return BuildSpatialResult(desc, (uint)designated, near, anchorInfo.id, anchorInfo.x, anchorInfo.z);

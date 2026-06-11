@@ -83,7 +83,7 @@ namespace RimWorld.GameRL.Actions
     [GameRLComponent]
     public static class ConstructionActions
     {
-        [GameRLAction("BuildRoom", Description = "Build a rectangular room: wall perimeter with one door, interior left clear. Width/Height are exterior cells (4-15). Door: N, S, E or W (centered). Returns a Room id usable as an anchor and with PlaceBuildingNear Inside=\"Room_1\". Refuses while an earlier room is still unfurnished (the error gives the exact furnish action) unless Force=true.")]
+        [GameRLAction("BuildRoom", Description = "Build a rectangular room: wall perimeter with one door, interior left clear. Width/Height are exterior cells (4-15). Door: N, S, E or W (centered). Furnish=\"Bed:3\" places furniture inside in the same action (recommended — rooms should not be left empty). Returns a Room id usable as an anchor and with PlaceBuildingNear Inside=\"Room_1\". Refuses while an earlier room is still unfurnished unless Force=true.")]
         public static string BuildRoom(
             [GameRLParam("Width")] int width = 7,
             [GameRLParam("Height")] int height = 5,
@@ -91,11 +91,27 @@ namespace RimWorld.GameRL.Actions
             [GameRLParam("Near")] string near = "ColonyCenter",
             [GameRLParam("Stuff")] string stuffDefName = null,
             [GameRLParam("Label")] string label = null,
+            [GameRLParam("Furnish")] string furnish = null,
             [GameRLParam("Force")] bool force = false)
         {
             var map = Find.CurrentMap;
             if (map == null)
                 throw new InvalidOperationException("BuildRoom: No map loaded");
+
+            // Parse Furnish ("Bed" or "Bed:3") up front so a typo fails the
+            // whole action before any walls go up.
+            string furnishDef = null;
+            int furnishCount = 1;
+            if (!string.IsNullOrEmpty(furnish))
+            {
+                var parts = furnish.Split(':');
+                furnishDef = parts[0].Trim();
+                if (parts.Length > 1 && int.TryParse(parts[1].Trim(), out int parsedCount))
+                    furnishCount = Math.Max(1, parsedCount);
+                if (DefDatabase<ThingDef>.GetNamed(furnishDef, errorOnFail: false) == null)
+                    throw new InvalidOperationException(
+                        $"BuildRoom: Unknown Furnish building '{furnishDef}'. Format: \"Bed:3\". Use ListBuildables to see available buildings.");
+            }
 
             // Guard against room spam: furnish what you built before building
             // more. (Observed failure mode: an agent looping BuildRoom every
@@ -193,13 +209,58 @@ namespace RimWorld.GameRL.Actions
 
             var desc = $"Built {record.Id}{(record.Label.Length > 0 ? $" '{record.Label}'" : "")} " +
                        $"({width}x{height}) walls ({rectFinal.minX}-{rectFinal.maxX},{rectFinal.minZ}-{rectFinal.maxZ}), " +
-                       $"door {doorSide} at ({doorPos.x},{doorPos.z}). " +
-                       $"Furnish with PlaceBuildingNear Inside=\"{record.Id}\"; verify with RenderMap.";
+                       $"door {doorSide} at ({doorPos.x},{doorPos.z}).";
+
+            // Same-action furnishing: reuse PlaceBuildingNear's interior
+            // placement so its shortfall warnings ride along in the feedback.
+            if (furnishDef != null)
+            {
+                try
+                {
+                    var furnishResult = SpatialActions.PlaceBuildingNear(
+                        furnishDef, null, furnishCount, null, record.Id);
+                    var furnishDesc = ExtractDescription(furnishResult);
+                    desc += $" {furnishDesc}.";
+                }
+                catch (Exception ex)
+                {
+                    desc += $" WARNING: furnishing failed — {ex.Message}";
+                }
+            }
+            else
+            {
+                desc += $" Furnish with PlaceBuildingNear Inside=\"{record.Id}\"; verify with RenderMap.";
+            }
             Log.Message($"[GameRL] {desc}");
 
             return SpatialActions.BuildSpatialResultFor(
                 desc, (uint)(wallsPlaced + 1), near, record.Id,
                 rectFinal.CenterCell.x, rectFinal.CenterCell.z, false);
+        }
+
+        /// <summary>
+        /// Pull the Description field out of a spatial-result JSON string
+        /// </summary>
+        private static string ExtractDescription(string spatialResultJson)
+        {
+            const string key = "\"Description\":\"";
+            int start = spatialResultJson.IndexOf(key, StringComparison.Ordinal);
+            if (start < 0) return spatialResultJson;
+            start += key.Length;
+            var sb = new System.Text.StringBuilder();
+            for (int i = start; i < spatialResultJson.Length; i++)
+            {
+                char c = spatialResultJson[i];
+                if (c == '\\' && i + 1 < spatialResultJson.Length)
+                {
+                    sb.Append(spatialResultJson[i + 1]);
+                    i++;
+                    continue;
+                }
+                if (c == '"') break;
+                sb.Append(c);
+            }
+            return sb.ToString();
         }
 
         private static IntVec3 DoorCell(CellRect rect, string side)
