@@ -83,18 +83,46 @@ namespace RimWorld.GameRL.Actions
     [GameRLComponent]
     public static class ConstructionActions
     {
-        [GameRLAction("BuildRoom", Description = "Build a rectangular room: wall perimeter with one door, interior left clear. Width/Height are exterior cells (4-15). Door: N, S, E or W (centered). Returns a Room id usable as an anchor and with PlaceBuildingNear Inside=\"Room_1\".")]
+        [GameRLAction("BuildRoom", Description = "Build a rectangular room: wall perimeter with one door, interior left clear. Width/Height are exterior cells (4-15). Door: N, S, E or W (centered). Returns a Room id usable as an anchor and with PlaceBuildingNear Inside=\"Room_1\". Refuses while an earlier room is still unfurnished (the error gives the exact furnish action) unless Force=true.")]
         public static string BuildRoom(
             [GameRLParam("Width")] int width = 7,
             [GameRLParam("Height")] int height = 5,
             [GameRLParam("Door")] string door = "S",
             [GameRLParam("Near")] string near = "ColonyCenter",
             [GameRLParam("Stuff")] string stuffDefName = null,
-            [GameRLParam("Label")] string label = null)
+            [GameRLParam("Label")] string label = null,
+            [GameRLParam("Force")] bool force = false)
         {
             var map = Find.CurrentMap;
             if (map == null)
                 throw new InvalidOperationException("BuildRoom: No map loaded");
+
+            // Guard against room spam: furnish what you built before building
+            // more. (Observed failure mode: an agent looping BuildRoom every
+            // "need beds" alert cycle, packing the colony with empty boxes.)
+            if (!force)
+            {
+                foreach (var existing in RoomRegistry.All(map))
+                {
+                    bool furnished = existing.Rect.ContractedBy(1).Cells.Any(c =>
+                    {
+                        if (!c.InBounds(map)) return false;
+                        var edifice = c.GetEdifice(map);
+                        return edifice != null
+                            && edifice.Faction == Faction.OfPlayer
+                            && edifice.def.defName != "Wall"
+                            && !(edifice is Building_Door);
+                    });
+                    if (!furnished)
+                    {
+                        throw new InvalidOperationException(
+                            $"BuildRoom: {existing.Id}{(existing.Label.Length > 0 ? $" '{existing.Label}'" : "")} " +
+                            $"at ({existing.Rect.CenterCell.x},{existing.Rect.CenterCell.z}) is still EMPTY. " +
+                            $"Furnish it first with exactly: {{\"Type\":\"PlaceBuildingNear\",\"Building\":\"Bed\",\"Count\":3,\"Inside\":\"{existing.Id}\"}} " +
+                            $"— or pass Force=true to build another room anyway.");
+                    }
+                }
+            }
 
             width = Math.Max(4, Math.Min(15, width));
             height = Math.Max(4, Math.Min(15, height));
@@ -130,7 +158,7 @@ namespace RimWorld.GameRL.Actions
             foreach (var center in GenRadial.RadialCellsAround(anchor, 30f, true))
             {
                 var rect = CellRect.CenteredOn(center, width, height);
-                if (FootprintIsClear(rect, map, wallDef, stuffDef))
+                if (FootprintIsClear(rect, map, wallDef, stuffDef, doorSide))
                 {
                     footprint = rect;
                     break;
@@ -187,11 +215,17 @@ namespace RimWorld.GameRL.Actions
             }
         }
 
-        private static bool FootprintIsClear(CellRect rect, Map map, ThingDef wallDef, ThingDef stuffDef)
+        private static bool FootprintIsClear(CellRect rect, Map map, ThingDef wallDef, ThingDef stuffDef, string doorSide)
         {
             if (rect.minX < 1 || rect.minZ < 1
                 || rect.maxX >= map.Size.x - 1 || rect.maxZ >= map.Size.z - 1)
                 return false;
+
+            // Never enclose or wall over a pawn
+            foreach (var cell in rect.Cells)
+            {
+                if (cell.GetFirstPawn(map) != null) return false;
+            }
 
             foreach (var cell in rect.EdgeCells)
             {
@@ -205,7 +239,26 @@ namespace RimWorld.GameRL.Actions
                 if (!cell.Standable(map)) return false;
                 if (cell.GetEdifice(map) != null) return false;
             }
+
+            // The door must open onto walkable ground: its outward neighbor
+            // can't be rock, another room's wall, or any edifice.
+            var doorPos = DoorCell(rect, doorSide);
+            var outside = doorPos + DoorOutwardOffset(doorSide);
+            if (!outside.InBounds(map) || !outside.Standable(map) || outside.GetEdifice(map) != null)
+                return false;
+
             return true;
+        }
+
+        private static IntVec3 DoorOutwardOffset(string side)
+        {
+            switch (side)
+            {
+                case "N": return new IntVec3(0, 0, 1);
+                case "S": return new IntVec3(0, 0, -1);
+                case "E": return new IntVec3(1, 0, 0);
+                default: return new IntVec3(-1, 0, 0);
+            }
         }
     }
 }
