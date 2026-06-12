@@ -194,6 +194,13 @@ namespace RimWorld.GameRL.Patches
                         RecentlyDismissed.Add($"Letter:{letter.Label}");
                     }
                 }
+
+                // Cap the list so it can't grow unbounded if never consumed via
+                // ConsumeRecentlyDismissed (drop oldest entries, keep at most 200).
+                if (RecentlyDismissed.Count > 200)
+                {
+                    RecentlyDismissed.RemoveRange(0, RecentlyDismissed.Count - 200);
+                }
             }
             catch (Exception ex)
             {

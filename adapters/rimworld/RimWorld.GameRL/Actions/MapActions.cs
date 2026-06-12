@@ -150,6 +150,11 @@ namespace RimWorld.GameRL.Actions
 
             // Calculate and deduct material costs
             // Use listerThings to count ALL items (including forbidden) — matches ResourceExtractor
+            //
+            // IMPORTANT: validate ALL costs (stuff + every costList item) UP FRONT before
+            // consuming/destroying anything. Otherwise a building that needs both stuff and
+            // costList items could have its stuff destroyed before a later costList shortfall
+            // throws — permanently losing materials with no building placed.
             int stuffNeeded = buildingDef.costStuffCount;
             if (stuffNeeded > 0 && stuffDef != null)
             {
@@ -158,6 +163,23 @@ namespace RimWorld.GameRL.Actions
                 {
                     throw new InvalidOperationException($"Not enough {stuffDef.defName} to build {buildingDefName}. Need {stuffNeeded}, have {available}.");
                 }
+            }
+
+            if (buildingDef.costList != null)
+            {
+                foreach (var cost in buildingDef.costList)
+                {
+                    int available = CountAllOnMap(map, cost.thingDef);
+                    if (available < cost.count)
+                    {
+                        throw new InvalidOperationException($"Not enough {cost.thingDef.defName} to build {buildingDefName}. Need {cost.count}, have {available}.");
+                    }
+                }
+            }
+
+            // All checks passed — now safe to consume materials.
+            if (stuffNeeded > 0 && stuffDef != null)
+            {
                 // Remove stuff materials from the map (unforbid before consuming)
                 int remaining = stuffNeeded;
                 foreach (var thing in map.listerThings.ThingsOfDef(stuffDef).ToList())
@@ -178,11 +200,6 @@ namespace RimWorld.GameRL.Actions
             {
                 foreach (var cost in buildingDef.costList)
                 {
-                    int available = CountAllOnMap(map, cost.thingDef);
-                    if (available < cost.count)
-                    {
-                        throw new InvalidOperationException($"Not enough {cost.thingDef.defName} to build {buildingDefName}. Need {cost.count}, have {available}.");
-                    }
                     int remaining = cost.count;
                     foreach (var thing in map.listerThings.ThingsOfDef(cost.thingDef).ToList())
                     {
