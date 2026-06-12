@@ -389,6 +389,36 @@ impl GameEnvironment for ZomboidBridge {
         }
     }
 
+    async fn observe(&mut self) -> Result<StepResult> {
+        let response = self.request(GameMessage::Observe).await?;
+
+        match response {
+            GameMessage::StepResult { result } => Ok(StepResult {
+                agent_id: result.agent_id,
+                step_id: 0,
+                tick: 0,
+                observation: result.observation,
+                reward: result.reward,
+                reward_components: result.reward_components,
+                done: result.done,
+                truncated: result.truncated,
+                termination_reason: None,
+                events: vec![],
+                frame_ids: HashMap::new(),
+                available_actions: None,
+                metrics: None,
+                state_hash: result.state_hash,
+            }),
+            GameMessage::Error { code, message } => Err(GameRLError::GameError(format!(
+                "Error {}: {}",
+                code, message
+            ))),
+            _ => Err(GameRLError::ProtocolError(
+                "Unexpected response to Observe".into(),
+            )),
+        }
+    }
+
     async fn state_hash(&mut self) -> Result<String> {
         let response = self.request(GameMessage::GetStateHash).await?;
 

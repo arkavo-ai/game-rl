@@ -72,6 +72,17 @@ local function handleMessage(msg)
         local player = getPlayer()
         local done = player and player:isDead() or false
 
+        -- Surface the action outcome to the agent (spec draft-02 §5.2 Feedback,
+        -- REQ-ERR-01 loud errors): RenderMap output, error messages, and
+        -- success text all ride here and in LastAction.
+        obs.Feedback = result.message
+        obs.LastAction = {
+            ActionType = result.action or action.Type,
+            Success = result.success,
+            Message = result.message,
+            ErrorCode = result.errorCode
+        }
+
         -- Include danger alert if pending
         local dangerAlert = GameRL.pendingDangerAlert
         GameRL.pendingDangerAlert = nil  -- consume it
@@ -85,8 +96,23 @@ local function handleMessage(msg)
             RewardComponents = {},
             Done = done,
             Truncated = false,
+            Error = (not result.success) and result.message or nil,
             StateHash = StateExtractor.computeStateHash(),
             DangerAlert = dangerAlert  -- nil if no danger, object if danger detected
+        })
+
+    elseif msg.Type == "Observe" then
+        -- Read-only snapshot (spec draft-02): no action, no time advance
+        local player = getPlayer()
+        IPC.send({
+            Type = "StepResult",
+            AgentId = msg.AgentId or "observer",
+            Observation = StateExtractor.extractObservation(true),
+            Reward = 0,
+            RewardComponents = {},
+            Done = player and player:isDead() or false,
+            Truncated = false,
+            StateHash = StateExtractor.computeStateHash()
         })
 
     elseif msg.Type == "GetStateHash" then

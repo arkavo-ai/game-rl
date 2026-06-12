@@ -635,6 +635,105 @@ function ActionDispatcher.Drink(params)
     return ActionDispatcher.UseItem(params)
 end
 
+-- === RenderMap: textual viewport (spec draft-02 viewport convention) ===
+-- Read-only ASCII map centered on the player with absolute coordinate
+-- rulers so the agent can Move to coordinates it reads off the map.
+-- NOTE: Zomboid world Y grows southward; rows are printed north (low Y) first.
+
+local function glyphAt(cell, x, y, z, player)
+    local sq = cell:getGridSquare(x, y, z)
+    if not sq then return " " end -- unloaded
+
+    -- Moving objects first: player, zombies
+    local moving = sq:getMovingObjects()
+    if moving then
+        for i = 0, moving:size() - 1 do
+            local obj = moving:get(i)
+            if instanceof(obj, "IsoPlayer") then return "P" end
+            if instanceof(obj, "IsoZombie") then return "Z" end
+        end
+    end
+
+    -- Structures: doors, windows, trees, walls
+    local objects = sq:getObjects()
+    if objects then
+        for i = 0, objects:size() - 1 do
+            local obj = objects:get(i)
+            if instanceof(obj, "IsoDoor") then return "D" end
+            if instanceof(obj, "IsoWindow") then return "W" end
+            if instanceof(obj, "IsoTree") then return "T" end
+        end
+    end
+    local props = sq:getProperties()
+    if props and (props:Is(IsoFlagType.collideW) or props:Is(IsoFlagType.collideN)
+        or sq:isSolid() or sq:isSolidTrans()) then
+        return "#"
+    end
+
+    -- Floor items
+    local worldObjects = sq:getWorldObjects()
+    if worldObjects and worldObjects:size() > 0 then return "i" end
+
+    if sq:Is(IsoFlagType.water) then return "~" end
+    if not sq:isOutside() then return "_" end -- interior floor
+    return "."
+end
+
+function ActionDispatcher.RenderMap(params)
+    local player = resolveSurvivor(params)
+    if not player then
+        return fail("RenderMap", "INVALID_SURVIVOR", "No player found")
+    end
+
+    local radius = params.Radius or 16
+    if radius < 4 then radius = 4 end
+    if radius > 30 then radius = 30 end
+
+    local px = math.floor(player:getX())
+    local py = math.floor(player:getY())
+    local pz = math.floor(player:getZ())
+    local cell = getCell()
+    if not cell then
+        return fail("RenderMap", "NO_CELL", "World cell not available")
+    end
+
+    local lines = {}
+    table.insert(lines, string.format(
+        "Map view: center Player (%d,%d) z=%d, x %d..%d, y %d..%d, NORTH(-y)=up, 1 char = 1 cell",
+        px, py, pz, px - radius, px + radius, py - radius, py + radius))
+
+    -- x ruler: absolute labels every 10 columns
+    local labels, ticks = "      ", "      "
+    for x = px - radius, px + radius do
+        local col = x - (px - radius)
+        if x % 10 == 0 then
+            while #labels < 6 + col do labels = labels .. " " end
+            if #labels == 6 + col then labels = labels .. tostring(x) end
+            while #ticks < 6 + col do ticks = ticks .. " " end
+            ticks = ticks .. "|"
+        end
+    end
+    table.insert(lines, labels)
+    table.insert(lines, ticks)
+
+    for y = py - radius, py + radius do
+        local row = string.format("%5d ", y)
+        for x = px - radius, px + radius do
+            local okGlyph, glyph = pcall(glyphAt, cell, x, y, pz, player)
+            row = row .. (okGlyph and glyph or "?")
+        end
+        table.insert(lines, row)
+    end
+
+    table.insert(lines,
+        "Legend: P player, Z zombie, # wall/solid, D door, W window, T tree, i item, _ interior floor, ~ water, . outside ground, (blank) unloaded")
+    table.insert(lines, string.format(
+        "Move to coordinates read off the rulers: {\"Type\":\"Move\",\"X\":%d,\"Y\":%d}. North is -y.",
+        px, py - 5))
+
+    return ok("RenderMap", table.concat(lines, "\n"))
+end
+
 -- === Dispatch ===
 
 function ActionDispatcher.dispatch(actionType, params)
@@ -675,7 +774,8 @@ function ActionDispatcher.getActionSpace()
             { name = "Drop", description = "Drop item from inventory", params = { ItemId = { type = "string" } } },
             { name = "UseItem", description = "Use item", params = { ItemId = { type = "string" } } },
             { name = "Eat", description = "Eat food", params = { ItemId = { type = "string" } } },
-            { name = "Drink", description = "Drink beverage", params = { ItemId = { type = "string" } } }
+            { name = "Drink", description = "Drink beverage", params = { ItemId = { type = "string" } } },
+            { name = "RenderMap", description = "ASCII map viewport centered on the player with coordinate rulers (read-only). Legend: P player, Z zombie, # wall, D door, W window, T tree, i item, _ interior, . outside. Coordinates work as Move targets; north is -y.", params = { Radius = { type = "int", min = 4, max = 30, default = 16 } } }
         }
     }
 end
