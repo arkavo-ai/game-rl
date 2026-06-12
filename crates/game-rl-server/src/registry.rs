@@ -18,18 +18,18 @@ impl AgentRegistry {
         }
     }
 
-    /// Register a new agent
+    /// Register a new agent.
+    /// Returns `Ok(true)` if newly registered, `Ok(false)` if already registered (idempotent).
     pub fn register(
         &mut self,
         agent_id: AgentId,
         agent_type: AgentType,
-    ) -> Result<(), RegistryError> {
+    ) -> Result<bool, RegistryError> {
+        if self.agents.contains_key(&agent_id) {
+            return Ok(false);
+        }
         if self.agents.len() >= self.max_agents {
             return Err(RegistryError::CapacityExceeded);
-        }
-        // Idempotent: if already registered, just return success
-        if self.agents.contains_key(&agent_id) {
-            return Ok(());
         }
 
         let entry = AgentEntry {
@@ -42,7 +42,7 @@ impl AgentRegistry {
         };
 
         self.agents.insert(agent_id, entry);
-        Ok(())
+        Ok(true)
     }
 
     /// Deregister an agent

@@ -140,6 +140,18 @@ mod tests {
     }
 
     #[test]
+    fn test_malformed_action_missing_type() {
+        // LLM sends action object without Type field - should fail gracefully
+        let json = r#"{"ColonistId": "Human917"}"#;
+        let result = serde_json::from_str::<Action>(json);
+        assert!(result.is_err(), "Should fail for missing Type");
+        assert!(
+            result.unwrap_err().to_string().contains("did not match"),
+            "Should produce 'did not match any variant' error"
+        );
+    }
+
+    #[test]
     fn test_wait_action() {
         let json = r#"{"Type": "wait"}"#;
         let action: Action = serde_json::from_str(json).unwrap();

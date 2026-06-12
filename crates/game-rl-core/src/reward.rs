@@ -17,18 +17,25 @@ pub struct Reward {
 pub type RewardComponents = HashMap<String, f64>;
 
 /// Definition of a reward component
+///
+/// Serializes PascalCase per spec draft-02 §1.5; snake_case aliases accepted.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct RewardComponentDef {
     /// Component name
+    #[serde(alias = "name")]
     pub name: String,
     /// Human-readable description
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "description")]
     pub description: Option<String>,
     /// Expected range
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "range")]
     pub range: Option<[f64; 2]>,
     /// Default weight
     #[serde(default = "default_weight")]
+    #[serde(alias = "default_weight")]
     pub default_weight: f64,
 }
 

@@ -202,6 +202,36 @@ namespace GameRL.Harmony.Protocol
     }
 
     /// <summary>
+    /// Observe current game state without ticking or executing actions.
+    /// Used for periodic cache refresh — lightweight read-only snapshot.
+    /// </summary>
+    public class ObserveMessage : GameMessage
+    {
+        public override string Type => "Observe";
+    }
+
+    /// <summary>
+    /// Request episode summary
+    /// </summary>
+    public class GetEpisodeSummaryMessage : GameMessage
+    {
+        public override string Type => "GetEpisodeSummary";
+    }
+
+    /// <summary>
+    /// Episode summary response with cumulative metrics
+    /// </summary>
+    public class EpisodeSummaryMessage : GameMessage
+    {
+        public override string Type => "EpisodeSummary";
+        public double TotalReward { get; set; }
+        public ulong StepCount { get; set; }
+        public ulong TicksElapsed { get; set; }
+        public Dictionary<string, double> RewardBreakdown { get; set; } = new();
+        public string? TerminationReason { get; set; }
+    }
+
+    /// <summary>
     /// Shutdown the game
     /// </summary>
     public class ShutdownMessage : GameMessage

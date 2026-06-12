@@ -17,8 +17,16 @@ namespace RimWorld.GameRL.State
         public string StateHash { get; set; } = "";        // Hash of current full state
         public string? PreviousHash { get; set; }          // Hash this delta is based on
         public ActionFeedback? LastAction { get; set; }
-        public List<string> Alerts { get; set; } = new();
+        public List<AlertState> Alerts { get; set; } = new();
         public List<GameEvent> Events { get; set; } = new();  // Causality: why things changed
+        public List<string> ValidActions { get; set; } = new();  // Actions valid at current state
+        public ResearchInfo? Research { get; set; }
+        public List<ZoneInfo> Zones { get; set; } = new();
+        public List<FactionRelationInfo> FactionRelations { get; set; } = new();
+        public List<PrisonerInfo> Prisoners { get; set; } = new();
+        public List<TraderInfo> ActiveTraders { get; set; } = new();
+        public List<BedAssignment> BedAssignments { get; set; } = new();
+        public PowerGridStatus? PowerGrid { get; set; }
         public ObservationDelta Delta { get; set; } = new();
     }
 

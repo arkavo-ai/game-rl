@@ -2,11 +2,30 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Incoming MCP message — either a request (has `id`) or a notification (no `id`).
+/// Per JSON-RPC 2.0, notifications MUST NOT have an `id` field.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum Message {
+    Request(Request),
+    Notification(ClientNotification),
+}
+
 /// MCP JSON-RPC request
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Request {
     pub jsonrpc: String,
     pub id: RequestId,
+    pub method: String,
+    #[serde(default)]
+    pub params: serde_json::Value,
+}
+
+/// Client notification (no id, no response expected).
+/// Examples: `notifications/initialized`, `notifications/cancelled`
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClientNotification {
+    pub jsonrpc: String,
     pub method: String,
     #[serde(default)]
     pub params: serde_json::Value,
@@ -103,16 +122,17 @@ pub struct InitializeResult {
     pub protocol_version: String,
     pub capabilities: ServerCapabilities,
     pub server_info: ServerInfo,
+    /// Optional instructions for the model on how to use this server
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 }
 
-/// Server capabilities
+/// Server capabilities — only advertise what we implement
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerCapabilities {
     pub tools: ToolsCapability,
     pub resources: ResourcesCapability,
-    #[serde(default)]
-    pub logging: serde_json::Value,
 }
 
 /// Tools capability
@@ -130,13 +150,15 @@ pub struct ResourcesCapability {
     pub list_changed: bool,
 }
 
-/// Server info
+/// Server info (MCP spec: name and version; gameRlVersion declares Game-RL
+/// protocol compliance per spec draft-02 §3.1)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ServerInfo {
     pub name: String,
     pub version: String,
-    pub game_rl_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub game_rl_version: Option<String>,
 }
 
 /// MCP JSON-RPC notification (no id, no response expected)
@@ -168,9 +190,9 @@ impl Notification {
             jsonrpc: "2.0".to_string(),
             method: "notifications/game/stateUpdate".to_string(),
             params: Some(serde_json::json!({
-                "tick": tick,
-                "state": state,
-                "events": events
+                "Tick": tick,
+                "State": state,
+                "Events": events
             })),
         }
     }

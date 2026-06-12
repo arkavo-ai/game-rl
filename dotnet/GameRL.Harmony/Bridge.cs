@@ -37,6 +37,8 @@ namespace GameRL.Harmony
         public event Action<ConfigureStreamsMessage>? OnConfigureStreams;
         public event Action<ResetMessage>? OnReset;
         public event Action<GetStateHashMessage>? OnGetStateHash;
+        public event Action<ObserveMessage>? OnObserve;
+        public event Action<GetEpisodeSummaryMessage>? OnGetEpisodeSummary;
         public event Action? OnShutdown;
         public event Action? OnClientConnected;
 
@@ -230,6 +232,8 @@ namespace GameRL.Harmony
                     "ConfigureStreams" => ParseConfigureStreams(obj),
                     "Reset" => ParseReset(obj),
                     "GetStateHash" => new GetStateHashMessage(),
+                    "Observe" => new ObserveMessage(),
+                    "GetEpisodeSummary" => new GetEpisodeSummaryMessage(),
                     "Shutdown" => new ShutdownMessage(),
                     _ => null
                 };
@@ -334,6 +338,12 @@ namespace GameRL.Harmony
                             break;
                         case GetStateHashMessage m:
                             OnGetStateHash?.Invoke(m);
+                            break;
+                        case ObserveMessage m:
+                            OnObserve?.Invoke(m);
+                            break;
+                        case GetEpisodeSummaryMessage m:
+                            OnGetEpisodeSummary?.Invoke(m);
                             break;
                         case ShutdownMessage:
                             OnShutdown?.Invoke();
@@ -456,6 +466,26 @@ namespace GameRL.Harmony
         }
 
         /// <summary>
+        /// Send episode summary with cumulative metrics
+        /// </summary>
+        public void SendEpisodeSummary(
+            double totalReward,
+            ulong stepCount,
+            ulong ticksElapsed,
+            Dictionary<string, double> rewardBreakdown,
+            string? terminationReason = null)
+        {
+            Send(new EpisodeSummaryMessage
+            {
+                TotalReward = totalReward,
+                StepCount = stepCount,
+                TicksElapsed = ticksElapsed,
+                RewardBreakdown = rewardBreakdown,
+                TerminationReason = terminationReason
+            });
+        }
+
+        /// <summary>
         /// Send state update (async notification)
         /// </summary>
         public void SendStateUpdate(ulong tick, object state, List<GameEvent>? events = null)
@@ -490,7 +520,7 @@ namespace GameRL.Harmony
             }
             catch (Exception ex)
             {
-                LogError($"Send error: {ex.Message}");
+                Log($"Send failed (client may have disconnected): {ex.Message}");
             }
         }
 
@@ -556,6 +586,15 @@ namespace GameRL.Harmony
                 case StreamsConfiguredMessage m:
                     obj["AgentId"] = m.AgentId;
                     obj["Descriptors"] = JToken.FromObject(m.Descriptors ?? new List<Dictionary<string, object>>());
+                    break;
+
+                case EpisodeSummaryMessage m:
+                    obj["TotalReward"] = m.TotalReward;
+                    obj["StepCount"] = m.StepCount;
+                    obj["TicksElapsed"] = m.TicksElapsed;
+                    obj["RewardBreakdown"] = JToken.FromObject(m.RewardBreakdown ?? new Dictionary<string, double>());
+                    if (m.TerminationReason != null)
+                        obj["TerminationReason"] = m.TerminationReason;
                     break;
 
                 case ErrorMessage m:

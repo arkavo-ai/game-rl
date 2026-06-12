@@ -1,0 +1,158 @@
+diff --git a/common/chat.cpp b/common/chat.cpp
+index 5b93c5887..e1b44455f 100644
+--- a/common/chat.cpp
++++ b/common/chat.cpp
+@@ -21,7 +21,10 @@
+ #include <exception>
+ #include <functional>
+ 
++#include <algorithm>
++#include <numeric>
+ #include <optional>
++#include <set>
+ #include <sstream>
+ #include <stdexcept>
+ #include <string>
+@@ -1153,15 +1156,139 @@ static common_chat_params common_chat_params_init_gemma4(const common_chat_templ
+ 
+             auto tool_choice = p.choice();
+ 
++            // Build a Gemma4-native constrained grammar from a JSON schema object.
++            // Enforces required fields and constrains value types using Gemma4 token syntax.
++            // Falls back to unconstrained gemma4-dict for schemas that are too complex.
++            std::function<common_peg_parser(const std::string &, const json &)> gemma4_schema_object;
++            gemma4_schema_object = [&](const std::string & prefix, const json & schema) -> common_peg_parser {
++                if (!schema.is_object() || !schema.contains("properties") || !schema["properties"].is_object()) {
++                    return p.ref("gemma4-dict");
++                }
++
++                const auto & properties = schema["properties"];
++                bool additional_allowed = !schema.contains("additionalProperties") || schema["additionalProperties"] != false;
++
++                std::set<std::string> required_set;
++                if (schema.contains("required") && schema["required"].is_array()) {
++                    for (const auto & r : schema["required"]) {
++                        if (r.is_string()) required_set.insert(r.get<std::string>());
++                    }
++                }
++
++                // Determine Gemma4 value parser for a property schema
++                auto value_parser_for = [&](const std::string & prop_prefix, const json & prop_schema) -> common_peg_parser {
++                    if (!prop_schema.is_object() || !prop_schema.contains("type")) {
++                        return p.ref("gemma4-value");
++                    }
++                    const std::string type_str = prop_schema["type"].get<std::string>();
++                    if (type_str == "string")                       return p.ref("gemma4-string");
++                    if (type_str == "integer" || type_str == "number") return p.ref("gemma4-number");
++                    if (type_str == "boolean")                      return p.ref("gemma4-bool");
++                    if (type_str == "null")                         return p.ref("gemma4-null");
++                    if (type_str == "array")                        return p.ref("gemma4-array");
++                    if (type_str == "object")                       return gemma4_schema_object(prop_prefix, prop_schema);
++                    return p.ref("gemma4-value");
++                };
++
++                // Build per-field rules: "FieldName:" ws value
++                std::vector<std::string> required_fields;
++                std::vector<std::string> optional_fields;
++
++                for (auto it = properties.begin(); it != properties.end(); ++it) {
++                    const std::string & field_name = it.key();
++                    const auto & field_schema = it.value();
++                    std::string field_rule_name = prefix + "-f-" + field_name;
++
++                    auto val = value_parser_for(prefix + "-" + field_name, field_schema);
++                    p.rule(field_rule_name, p.literal(field_name) + p.literal(":") + p.space() + val);
++
++                    if (required_set.count(field_name)) {
++                        required_fields.push_back(field_name);
++                    } else {
++                        optional_fields.push_back(field_name);
++                    }
++                }
++
++                auto ws = p.space();
++                auto comma_ws = p.literal(",") + ws;
++
++                // Build optional-field choice rule (any declared optional field, or unknown field if additionalProperties)
++                bool has_opt = !optional_fields.empty() || additional_allowed;
++                if (has_opt) {
++                    auto opt_choices = p.choice();
++                    for (const auto & fname : optional_fields) {
++                        opt_choices |= p.ref(prefix + "-f-" + fname);
++                    }
++                    if (additional_allowed) {
++                        opt_choices |= p.ref("gemma4-dict-kv");
++                    }
++                    p.rule(prefix + "-opt", opt_choices);
++                }
++
++                // No required fields: just match optional fields in any order
++                if (required_fields.empty()) {
++                    if (has_opt) {
++                        auto member = p.ref(prefix + "-opt");
++                        auto members = p.sequence({member, p.zero_or_more(p.sequence({comma_ws, member}))});
++                        return p.rule(prefix + "-obj", p.sequence({
++                            p.literal("{"), ws,
++                            p.choice({p.literal("}"), p.sequence({members, ws, p.literal("}")})})
++                        }));
++                    }
++                    return p.ref("gemma4-dict");
++                }
++
++                // Too many required fields — fall back to avoid combinatorial explosion
++                if (required_fields.size() > 4) {
++                    return p.ref("gemma4-dict");
++                }
++
++                // Generate all permutations of required fields, with optional fields interspersed.
++                // For N required fields this produces N! alternatives — capped at 4! = 24.
++                std::vector<size_t> perm_indices(required_fields.size());
++                std::iota(perm_indices.begin(), perm_indices.end(), 0);
++
++                auto build_permutation = [&](const std::vector<size_t> & indices) -> common_peg_parser {
++                    // Pattern: opt* req[0] (,opt)* , opt* req[1] (,opt)* , ... , opt* req[N-1] (,opt)*
++                    auto body = p.eps();
++                    for (size_t i = 0; i < indices.size(); i++) {
++                        if (i > 0) {
++                            body = body + comma_ws;
++                        }
++                        // Optional fields before this required field
++                        if (has_opt) {
++                            body = body + p.zero_or_more(p.ref(prefix + "-opt") + comma_ws);
++                        }
++                        body = body + p.ref(prefix + "-f-" + required_fields[indices[i]]);
++                    }
++                    // Trailing optional fields
++                    if (has_opt) {
++                        body = body + p.zero_or_more(comma_ws + p.ref(prefix + "-opt"));
++                    }
++                    return body;
++                };
++
++                auto perm_choice = p.choice();
++                do {
++                    perm_choice |= build_permutation(perm_indices);
++                } while (std::next_permutation(perm_indices.begin(), perm_indices.end()));
++
++                return p.rule(prefix + "-obj", p.sequence({
++                    p.literal("{"), ws, perm_choice, ws, p.literal("}")
++                }));
++            };
++
+             foreach_function(inputs.tools, [&](const json & tool) {
+                 const auto & function = tool.at("function");
+                 std::string  name     = function.at("name");
+-                // TODO @aldehir : need to extend json-schema-to-grammar to produce more than JSON rules
+-                // const auto & params   = function.at("parameters");
++                json params = function.contains("parameters") ? function.at("parameters") : json::object();
++
++                // Generate constrained Gemma4 grammar from tool schema
++                auto args_grammar = gemma4_schema_object("g4-" + name, params);
+ 
+                 tool_choice |= p.rule("tool-" + name, p.tool(p.sequence({
+                     p.tool_open(p.tool_name(p.literal(name)) + p.peek(p.literal("{"))),
+-                    p.tool_args(p.ref("gemma4-dict")),
++                    p.tool_args(args_grammar),
+                 })));
+             });
+ 

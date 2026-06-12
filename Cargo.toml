@@ -9,6 +9,8 @@ members = [
     "crates/harmony-bridge",
     "crates/zomboid-bridge",
     "crates/factorio-bridge",
+    "crates/game-rl-reference",
+    "crates/game-rl-conformance",
 ]
 
 [workspace.package]
@@ -42,6 +44,15 @@ interprocess = "2.0"
 sha2 = "0.10"
 hex = "0.4"
 
+# HTTP transport
+axum = "0.8"
+tokio-stream = { version = "0.1", features = ["sync"] }
+uuid = { version = "1", features = ["v4"] }
+tower-http = { version = "0.6", features = ["cors"] }
+
+# CLI
+clap = { version = "4", features = ["derive"] }
+
 # Testing
 tokio-test = "0.4"
 
@@ -51,6 +62,7 @@ game-rl-server = { path = "crates/game-rl-server" }
 game-rl-cli = { path = "crates/game-rl-cli" }
 game-rl-client = { path = "crates/game-rl-client" }
 game-bridge = { path = "crates/game-bridge" }
+game-rl-reference = { path = "crates/game-rl-reference" }
 harmony-bridge = { path = "crates/harmony-bridge" }
 zomboid-bridge = { path = "crates/zomboid-bridge" }
 factorio-bridge = { path = "crates/factorio-bridge" }

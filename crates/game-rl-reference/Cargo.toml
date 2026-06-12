@@ -1,0 +1,27 @@
+[package]
+name = "game-rl-reference"
+description = "Game-RL reference environment (GridColony) — spec draft-02 Level 3, with center-bias behavioral probes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[[bin]]
+name = "game-rl-reference"
+path = "src/main.rs"
+
+[dependencies]
+game-rl-core = { workspace = true }
+game-rl-server = { workspace = true }
+async-trait = "0.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+sha2 = { workspace = true }
+hex = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+clap = { workspace = true }

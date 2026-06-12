@@ -1,7 +1,7 @@
 {
   "name": "RimWorld",
   "version": "1.6",
-  "game_rl_version": "0.5.0",
+  "game_rl_version": "0.6.0",
   "capabilities": {
     "multi_agent": true,
     "max_agents": 8,
@@ -40,11 +40,6 @@
   "action_space": {
     "type": "discrete_parameterized",
     "actions": [
-      {
-        "name": "Wait",
-        "description": "Do nothing, just advance simulation",
-        "params": {}
-      },
       {
         "name": "Draft",
         "description": "Draft a colonist for direct control",
@@ -202,8 +197,280 @@
         }
       },
       {
+        "name": "UnforbidByType",
+        "description": "Unforbid all items of a specific type (e.g., MealSurvivalPack, Steel, WoodLog)",
+        "params": {"DefName": {"type": "string", "description": "Item defName from ForbiddenItemCounts in Resources"}}
+      },
+      {
+        "name": "SetSpeed",
+        "description": "Set game speed (0=paused, 1=normal, 2=fast, 3=superfast)",
+        "params": {
+          "Speed": {"type": "int", "min": 0, "max": 3}
+        }
+      },
+      {
+        "name": "Unpause",
+        "description": "Resume the game at normal speed",
+        "params": {}
+      },
+      {
+        "name": "SaveCheckpoint",
+        "description": "Save game state for episode reset",
+        "params": {
+          "Name": {"type": "string", "default": "gamerl_checkpoint", "description": "Save file name"}
+        }
+      },
+      {
+        "name": "LoadCheckpoint",
+        "description": "Load a saved game checkpoint to reset episode",
+        "params": {
+          "Name": {"type": "string", "default": "gamerl_checkpoint", "description": "Save file name"}
+        }
+      },
+      {
+        "name": "SetMedicalCare",
+        "description": "Set medical care level for a pawn (nocare, nomeds, herbal, normal, best)",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "CareLevel": {"type": "string", "enum": ["nocare", "nomeds", "herbal", "normal", "best"]}
+        }
+      },
+      {
+        "name": "Rescue",
+        "description": "Have a colonist rescue a downed pawn to a medical bed",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Rescuer"},
+          "TargetId": {"type": "entity_id", "description": "Downed pawn to rescue"}
+        }
+      },
+      {
+        "name": "TendTo",
+        "description": "Have a doctor tend to an injured/sick pawn",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Doctor"},
+          "TargetId": {"type": "entity_id", "description": "Patient to tend"}
+        }
+      },
+      {
+        "name": "SetSchedule",
+        "description": "Set a colonist's schedule for a specific hour (Work, Sleep, Joy, Anything)",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "Hour": {"type": "int", "min": 0, "max": 23},
+          "Assignment": {"type": "string", "enum": ["Work", "Sleep", "Joy", "Anything"]}
+        }
+      },
+      {
+        "name": "AssignBed",
+        "description": "Assign a colonist to a specific bed",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "BedId": {"type": "entity_id", "description": "Bed ThingID from Entities.Buildings"}
+        }
+      },
+      {
+        "name": "OperateSurgery",
+        "description": "Schedule a surgery on a pawn (e.g., InstallPegLeg, RemoveBodyPart)",
+        "params": {
+          "PatientId": {"type": "entity_id"},
+          "Recipe": {"type": "string", "description": "Surgery recipe defName"},
+          "BodyPart": {"type": "string", "optional": true, "description": "Body part label (auto-selected if omitted)"}
+        }
+      },
+      {
+        "name": "Bury",
+        "description": "Have a colonist bury a corpse in an available grave",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Hauler"},
+          "CorpseId": {"type": "entity_id", "description": "Corpse ThingID"}
+        }
+      },
+      {
+        "name": "OpenCasket",
+        "description": "Have a colonist open a cryptosleep casket or container",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "BuildingId": {"type": "entity_id", "description": "Casket/container ThingID"}
+        }
+      },
+      {
+        "name": "FormCaravan",
+        "description": "Form a caravan with specified colonists to travel on the world map",
+        "params": {
+          "ColonistIds": {"type": "string", "description": "Comma-separated colonist ThingIDs"},
+          "DestinationTile": {"type": "int", "description": "World map tile ID"}
+        }
+      },
+      {
+        "name": "CancelBill",
+        "description": "Remove a bill from a workbench",
+        "params": {
+          "BuildingId": {"type": "entity_id", "description": "Workbench ThingID"},
+          "BillIndex": {"type": "int", "default": 0, "description": "Index of bill to remove"}
+        }
+      },
+      {
+        "name": "ModifyBill",
+        "description": "Modify a bill's repeat count or mode",
+        "params": {
+          "BuildingId": {"type": "entity_id", "description": "Workbench ThingID"},
+          "BillIndex": {"type": "int", "default": 0},
+          "Count": {"type": "int", "optional": true, "description": "New repeat count"},
+          "RepeatForever": {"type": "bool", "optional": true}
+        }
+      },
+      {
+        "name": "SelectResearch",
+        "description": "Select a research project. Use defNames from Research.Available in observation.",
+        "params": {
+          "ProjectDefName": {"type": "string", "description": "Research project defName"}
+        }
+      },
+      {
+        "name": "DeleteZone",
+        "description": "Delete a zone by its label (from Zones observation)",
+        "params": {
+          "ZoneLabel": {"type": "string"}
+        }
+      },
+      {
+        "name": "SetStockpilePriority",
+        "description": "Set stockpile priority (1=low, 2=normal, 3=preferred, 4=important, 5=critical)",
+        "params": {
+          "ZoneLabel": {"type": "string"},
+          "Priority": {"type": "int", "min": 1, "max": 5}
+        }
+      },
+      {
+        "name": "SetGrowingPlant",
+        "description": "Change what plant a growing zone grows (e.g., Plant_Rice, Plant_Potato)",
+        "params": {
+          "ZoneLabel": {"type": "string"},
+          "PlantDefName": {"type": "string"}
+        }
+      },
+      {
+        "name": "SetPrisonerInteraction",
+        "description": "Set how to interact with a prisoner (AttemptRecruit, ReduceResistance, Release, Execution)",
+        "params": {
+          "PrisonerId": {"type": "entity_id"},
+          "Mode": {"type": "string", "enum": ["AttemptRecruit", "ReduceResistance", "Release", "Execution"]}
+        }
+      },
+      {
+        "name": "DesignateTame",
+        "description": "Mark a wild animal for taming by a handler",
+        "params": {
+          "TargetId": {"type": "entity_id", "description": "Wild animal ThingID"}
+        }
+      },
+      {
+        "name": "SetAnimalTraining",
+        "description": "Toggle a training type for a tamed animal",
+        "params": {
+          "AnimalId": {"type": "entity_id"},
+          "TrainingDef": {"type": "string", "enum": ["Obedience", "Release", "Rescue", "Haul"]},
+          "Enabled": {"type": "bool", "default": true}
+        }
+      },
+      {
+        "name": "SetAnimalArea",
+        "description": "Restrict an animal to a named area (or 'Unrestricted')",
+        "params": {
+          "AnimalId": {"type": "entity_id"},
+          "AreaLabel": {"type": "string", "description": "Area name or 'Unrestricted'"}
+        }
+      },
+      {
+        "name": "DesignateSlaughter",
+        "description": "Mark a tamed animal for slaughter",
+        "params": {
+          "AnimalId": {"type": "entity_id"}
+        }
+      },
+      {
+        "name": "Deconstruct",
+        "description": "Designate a building for deconstruction to recover materials",
+        "params": {
+          "BuildingId": {"type": "entity_id", "description": "Building ThingID from Entities.Buildings"}
+        }
+      },
+      {
+        "name": "DesignateRepair",
+        "description": "Force a colonist to repair a damaged building",
+        "params": {
+          "ColonistId": {"type": "entity_id"},
+          "BuildingId": {"type": "entity_id", "description": "Damaged building ThingID"}
+        }
+      },
+      {
+        "name": "SmoothFloor",
+        "description": "Designate natural stone floor for smoothing in an area",
+        "params": {
+          "X": {"type": "int"},
+          "Y": {"type": "int"},
+          "Radius": {"type": "int", "default": 3}
+        }
+      },
+      {
+        "name": "Trade",
+        "description": "Buy or sell items with an active trader",
+        "params": {
+          "TraderId": {"type": "string", "description": "Trader name from ActiveTraders"},
+          "ItemDefName": {"type": "string"},
+          "Count": {"type": "int"},
+          "IsBuy": {"type": "bool", "default": true}
+        }
+      },
+      {
+        "name": "ListTraderGoods",
+        "description": "List items available from an active trader with prices",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Negotiator colonist"},
+          "TraderId": {"type": "entity_id", "description": "Trader pawn ID from ActiveTraders/Entities.Visitors"}
+        }
+      },
+      {
+        "name": "BuyFromTrader",
+        "description": "Buy items from an active trader using colony silver",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Negotiator colonist"},
+          "TraderId": {"type": "entity_id", "description": "Trader pawn ID"},
+          "ItemDefName": {"type": "string", "description": "Item defName to buy"},
+          "Count": {"type": "int"}
+        }
+      },
+      {
+        "name": "SellToTrader",
+        "description": "Sell colony items to an active trader for silver",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Negotiator colonist"},
+          "TraderId": {"type": "entity_id", "description": "Trader pawn ID"},
+          "ItemDefName": {"type": "string", "description": "Item defName to sell"},
+          "Count": {"type": "int"}
+        }
+      },
+      {
+        "name": "Arrest",
+        "description": "Arrest a non-hostile pawn (visitor/wanderer). Requires drafted colonist. WARNING: faction goodwill penalty",
+        "params": {
+          "ColonistId": {"type": "entity_id", "description": "Drafted colonist"},
+          "TargetId": {"type": "entity_id", "description": "Visitor/wanderer to arrest"}
+        }
+      },
+      {
+        "name": "ListBuildables",
+        "description": "List all available building defs with material requirements (for PlaceBlueprint)",
+        "params": {}
+      },
+      {
+        "name": "DismissLetters",
+        "description": "Dismiss all pending letter notifications (research done, events, etc.)",
+        "params": {}
+      },
+      {
         "name": "RequestFullState",
-        "description": "Request full state observation on next sim_step (use if StateHash mismatch)",
+        "description": "Request full state observation on next step (use if StateHash mismatch)",
         "params": {}
       }
     ]
@@ -223,7 +490,7 @@
       "Threats": {"type": "sequence"},
       "Visitors": {"type": "sequence"},
       "Entities": {"type": "dict", "description": "Categorized entity index (Colonists, Animals, Buildings, etc.)"},
-      "Alerts": {"type": "sequence", "description": "Active game alerts"},
+      "Alerts": {"type": "sequence", "description": "Active alerts with severity: [{Label, Severity(1=Normal,2=High,3=Critical)}]"},
       "IdleColonists": {"type": "int"},
       "LastAction": {"type": "dict", "optional": true, "description": "Feedback from last action"},
       "Episode": {"type": "dict", "description": "Episode progress info"}

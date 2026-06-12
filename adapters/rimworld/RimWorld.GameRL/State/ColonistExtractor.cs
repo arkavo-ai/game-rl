@@ -69,6 +69,60 @@ namespace RimWorld.GameRL.State
         public Dictionary<string, int> Skills { get; set; } = new();
 
         public Dictionary<string, int> WorkPriorities { get; set; } = new();
+
+        public List<string> Traits { get; set; } = new();
+
+        public List<HediffInfo> Injuries { get; set; } = new();
+
+        public List<SocialRelation> Relations { get; set; } = new();
+
+        public Dictionary<string, string> SkillPassions { get; set; } = new();
+
+        public List<string> DisabledWorkTypes { get; set; } = new();
+
+        public List<ApparelInfo> Apparel { get; set; } = new();
+
+        /// <summary>
+        /// Schedule assignments by hour (0-23). Values: Work, Sleep, Joy, Anything
+        /// </summary>
+        public Dictionary<int, string>? Schedule { get; set; }
+    }
+
+    /// <summary>
+    /// Worn apparel with protection stats
+    /// </summary>
+    public class ApparelInfo
+    {
+        public string DefName { get; set; } = "";
+        public string Label { get; set; } = "";
+        public float HitPointsPercent { get; set; }
+        public float InsulationCold { get; set; }
+        public float InsulationHeat { get; set; }
+        public float ArmorSharp { get; set; }
+        public float ArmorBlunt { get; set; }
+    }
+
+    /// <summary>
+    /// Social relation between two colonists
+    /// </summary>
+    public class SocialRelation
+    {
+        public string OtherPawnId { get; set; } = "";
+        public string RelationType { get; set; } = "";
+        public int Opinion { get; set; }
+    }
+
+    /// <summary>
+    /// Health condition (injury, disease, implant, etc.)
+    /// </summary>
+    public class HediffInfo
+    {
+        public string DefName { get; set; } = "";
+        public string Label { get; set; } = "";
+        public string? BodyPart { get; set; }
+        public float Severity { get; set; }
+        public bool LifeThreatening { get; set; }
+        public bool Bleeding { get; set; }
     }
 
     /// <summary>
@@ -130,8 +184,27 @@ namespace RimWorld.GameRL.State
                 HasRangedWeapon = pawn.equipment?.Primary?.def?.IsRangedWeapon ?? false,
                 Needs = ExtractNeeds(pawn),
                 Skills = ExtractSkills(pawn),
-                WorkPriorities = ExtractWorkPriorities(pawn)
+                WorkPriorities = ExtractWorkPriorities(pawn),
+                Traits = ExtractTraits(pawn),
+                Injuries = ExtractInjuries(pawn),
+                Relations = ExtractRelations(pawn),
+                SkillPassions = ExtractSkillPassions(pawn),
+                DisabledWorkTypes = ExtractDisabledWorkTypes(pawn),
+                Apparel = ExtractApparel(pawn),
+                Schedule = ExtractSchedule(pawn)
             };
+        }
+
+        private static Dictionary<int, string>? ExtractSchedule(Pawn pawn)
+        {
+            if (pawn.timetable == null) return null;
+            var schedule = new Dictionary<int, string>();
+            for (int hour = 0; hour < 24; hour++)
+            {
+                var assignment = pawn.timetable.GetAssignment(hour);
+                schedule[hour] = assignment?.defName ?? "Anything";
+            }
+            return schedule;
         }
 
         private static Dictionary<string, NeedState> ExtractNeeds(Pawn pawn)
@@ -205,6 +278,87 @@ namespace RimWorld.GameRL.State
             return skills;
         }
 
+        private static List<string> ExtractTraits(Pawn pawn)
+        {
+            var traits = new List<string>();
+            if (pawn.story?.traits == null) return traits;
+
+            try
+            {
+                foreach (var trait in pawn.story.traits.allTraits)
+                {
+                    if (trait?.def != null)
+                    {
+                        traits.Add(trait.CurrentData?.label ?? trait.def.defName);
+                    }
+                }
+            }
+            catch
+            {
+                // Return partial results
+            }
+            return traits;
+        }
+
+        private static List<HediffInfo> ExtractInjuries(Pawn pawn)
+        {
+            var injuries = new List<HediffInfo>();
+            if (pawn.health?.hediffSet == null) return injuries;
+
+            try
+            {
+                foreach (var hediff in pawn.health.hediffSet.hediffs)
+                {
+                    if (hediff == null || !hediff.Visible) continue;
+
+                    injuries.Add(new HediffInfo
+                    {
+                        DefName = hediff.def.defName,
+                        Label = hediff.LabelCap,
+                        BodyPart = hediff.Part?.Label,
+                        Severity = hediff.Severity,
+                        LifeThreatening = hediff.CurStage?.lifeThreatening ?? false,
+                        Bleeding = hediff.Bleeding
+                    });
+                }
+            }
+            catch
+            {
+                // Return partial results
+            }
+            return injuries;
+        }
+
+        private static List<SocialRelation> ExtractRelations(Pawn pawn)
+        {
+            var relations = new List<SocialRelation>();
+            if (pawn.relations == null) return relations;
+
+            try
+            {
+                // Get direct relationships (spouse, child, lover, rival, etc.)
+                foreach (var rel in pawn.relations.DirectRelations)
+                {
+                    if (rel?.otherPawn == null || rel.otherPawn.Destroyed) continue;
+
+                    var opinion = 0;
+                    try { opinion = pawn.relations.OpinionOf(rel.otherPawn); } catch { }
+
+                    relations.Add(new SocialRelation
+                    {
+                        OtherPawnId = rel.otherPawn.ThingID,
+                        RelationType = rel.def?.defName ?? "Unknown",
+                        Opinion = opinion
+                    });
+                }
+            }
+            catch
+            {
+                // Return partial results
+            }
+            return relations;
+        }
+
         private static Dictionary<string, int> ExtractWorkPriorities(Pawn pawn)
         {
             var priorities = new Dictionary<string, int>();
@@ -218,6 +372,62 @@ namespace RimWorld.GameRL.State
                 }
             }
             return priorities;
+        }
+
+        private static Dictionary<string, string> ExtractSkillPassions(Pawn pawn)
+        {
+            var passions = new Dictionary<string, string>();
+            if (pawn.skills == null) return passions;
+
+            foreach (var skill in pawn.skills.skills)
+            {
+                passions[skill.def.defName] = skill.passion.ToString();
+            }
+            return passions;
+        }
+
+        private static List<string> ExtractDisabledWorkTypes(Pawn pawn)
+        {
+            var disabled = new List<string>();
+            if (pawn.story == null) return disabled;
+
+            try
+            {
+                foreach (var workType in DefDatabase<WorkTypeDef>.AllDefs)
+                {
+                    if (pawn.WorkTypeIsDisabled(workType))
+                    {
+                        disabled.Add(workType.defName);
+                    }
+                }
+            }
+            catch { }
+            return disabled;
+        }
+
+        private static List<ApparelInfo> ExtractApparel(Pawn pawn)
+        {
+            var apparel = new List<ApparelInfo>();
+            if (pawn.apparel?.WornApparel == null) return apparel;
+
+            try
+            {
+                foreach (var a in pawn.apparel.WornApparel)
+                {
+                    apparel.Add(new ApparelInfo
+                    {
+                        DefName = a.def.defName,
+                        Label = a.LabelShort,
+                        HitPointsPercent = (float)a.HitPoints / a.MaxHitPoints,
+                        InsulationCold = a.GetStatValue(StatDefOf.Insulation_Cold),
+                        InsulationHeat = a.GetStatValue(StatDefOf.Insulation_Heat),
+                        ArmorSharp = a.GetStatValue(StatDefOf.ArmorRating_Sharp),
+                        ArmorBlunt = a.GetStatValue(StatDefOf.ArmorRating_Blunt)
+                    });
+                }
+            }
+            catch { }
+            return apparel;
         }
     }
 }

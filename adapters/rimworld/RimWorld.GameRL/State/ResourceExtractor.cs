@@ -17,7 +17,15 @@ namespace RimWorld.GameRL.State
 
         public float TotalWealth { get; set; }
 
-        public int FoodDays { get; set; }
+        /// <summary>
+        /// Days of food colonists can actually access (unforbidden)
+        /// </summary>
+        public int AccessibleFoodDays { get; set; }
+
+        /// <summary>
+        /// Days of food counting ALL items on map (including forbidden)
+        /// </summary>
+        public int TotalFoodDays { get; set; }
 
         public int MedicineCount { get; set; }
     }
@@ -47,33 +55,66 @@ namespace RimWorld.GameRL.State
                 ThingDefOf.Chemfuel
             };
 
+            // Count ALL items on the map (including forbidden) via listerThings
+            // resourceCounter.GetCount() only counts non-forbidden items in stockpiles,
+            // which reads as 0 at game start when everything is forbidden
             foreach (var def in importantDefs)
             {
-                stockpiles[def.defName] = map.resourceCounter.GetCount(def);
+                int total = 0;
+                foreach (var thing in map.listerThings.ThingsOfDef(def))
+                {
+                    if (thing != null && !thing.Destroyed && thing.Spawned)
+                        total += thing.stackCount;
+                }
+                stockpiles[def.defName] = total;
             }
 
-            // Food calculation
-            float foodCount = map.resourceCounter.TotalHumanEdibleNutrition;
+            // Food calculation - count accessible vs total separately
+            float accessibleFood = 0f;
+            float totalFood = 0f;
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (thing != null && !thing.Destroyed && thing.Spawned && thing.def.IsNutritionGivingIngestible)
+                {
+                    float nutrition = thing.GetStatValue(RimWorld.StatDefOf.Nutrition) * thing.stackCount;
+                    totalFood += nutrition;
+                    if (thing is ThingWithComps twc && !twc.IsForbidden(Faction.OfPlayer))
+                        accessibleFood += nutrition;
+                    else if (!(thing is ThingWithComps))
+                        accessibleFood += nutrition;  // Non-comp things can't be forbidden
+                }
+            }
             int colonistCount = map.mapPawns.FreeColonistsCount;
-            int foodDays = colonistCount > 0
-                ? (int)(foodCount / (colonistCount * 1.6f))  // ~1.6 nutrition per day per colonist
+            int accessibleFoodDays = colonistCount > 0
+                ? (int)(accessibleFood / (colonistCount * 1.6f))
+                : 0;
+            int totalFoodDays = colonistCount > 0
+                ? (int)(totalFood / (colonistCount * 1.6f))
                 : 0;
 
-            // Medicine count (all types)
+            // Medicine count (all types) - count ALL including forbidden
             int medicineCount = 0;
-            if (ThingDefOf.MedicineHerbal != null)
-                medicineCount += map.resourceCounter.GetCount(ThingDefOf.MedicineHerbal);
-            if (ThingDefOf.MedicineIndustrial != null)
-                medicineCount += map.resourceCounter.GetCount(ThingDefOf.MedicineIndustrial);
-            if (ThingDefOf.MedicineUltratech != null)
-                medicineCount += map.resourceCounter.GetCount(ThingDefOf.MedicineUltratech);
+            foreach (var thing in map.listerThings.AllThings)
+            {
+                if (thing != null && !thing.Destroyed && thing.Spawned && thing.def.IsMedicine)
+                    medicineCount += thing.stackCount;
+            }
+
+            // Silver - count all on map
+            int silver = 0;
+            foreach (var thing in map.listerThings.ThingsOfDef(ThingDefOf.Silver))
+            {
+                if (thing != null && !thing.Destroyed && thing.Spawned)
+                    silver += thing.stackCount;
+            }
 
             return new ResourceState
             {
                 Stockpiles = stockpiles,
-                Silver = map.resourceCounter.GetCount(ThingDefOf.Silver),
+                Silver = silver,
                 TotalWealth = map.wealthWatcher.WealthTotal,
-                FoodDays = foodDays,
+                AccessibleFoodDays = accessibleFoodDays,
+                TotalFoodDays = totalFoodDays,
                 MedicineCount = medicineCount
             };
         }

@@ -558,7 +558,7 @@ impl GameEnvironment for FactorioBridge {
         GameManifest {
             name: "Factorio".to_string(),
             version: self.game_version.clone(),
-            game_rl_version: "0.5.0".to_string(),
+            game_rl_version: game_rl_core::PROTOCOL_VERSION.to_string(),
             capabilities: Capabilities {
                 multi_agent: true,
                 max_agents: 8,
@@ -575,6 +575,7 @@ impl GameEnvironment for FactorioBridge {
                 save_replay: true,
                 domain_randomization: true,
                 variable_timestep: true,
+                spatial_intent: false,
             },
             scenarios: vec![
                 Scenario {
